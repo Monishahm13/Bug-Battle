@@ -36,9 +36,12 @@ app.use("/api/questions", questionRoutes);
 app.use("/api/submissions", submissionRoutes);
 
 const path = require("path");
+const fs = require("fs");
 
 const frontendDistPath = path.join(__dirname, "../frontend/dist");
-app.use(express.static(frontendDistPath));
+if (fs.existsSync(frontendDistPath)) {
+    app.use(express.static(frontendDistPath));
+}
 
 app.get("/api/health", (req, res) => {
     res.json({
@@ -47,10 +50,17 @@ app.get("/api/health", (req, res) => {
     });
 });
 
-// All non-API GET routes serve frontend SPA index.html
+// All non-API GET routes serve frontend SPA index.html if built, otherwise API status
 app.use((req, res, next) => {
     if (req.method === "GET" && !req.path.startsWith("/api")) {
-        return res.sendFile(path.join(frontendDistPath, "index.html"));
+        const indexPath = path.join(frontendDistPath, "index.html");
+        if (fs.existsSync(indexPath)) {
+            return res.sendFile(indexPath);
+        }
+        return res.json({
+            message: "BUG BATTLE Backend API is live",
+            status: "success"
+        });
     }
     next();
 });
