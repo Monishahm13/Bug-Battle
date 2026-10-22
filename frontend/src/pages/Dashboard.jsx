@@ -14,7 +14,6 @@ import {
     Terminal,
     LogOut,
     ShieldAlert,
-    Award,
     Settings,
     X,
     Play,
@@ -22,7 +21,6 @@ import {
     Clock3,
     Lock
 } from "lucide-react";
-import RulesModal from "../components/RulesModal";
 import { getAuthToken, clearAuthSession } from "../utils/auth";
 import { API_BASE_URL } from "../config/api";
 
@@ -59,7 +57,6 @@ function Dashboard() {
     const [eventMessage, setEventMessage] = useState("");
     const [registeringEvent, setRegisteringEvent] = useState(false);
     const [activeEvent, setActiveEvent] = useState(null);
-    const [showRules, setShowRules] = useState(false);
     const [showChallenges, setShowChallenges] = useState(false);
     const [showTeam, setShowTeam] = useState(false);
     const [qualificationData, setQualificationData] = useState(null);
@@ -560,8 +557,6 @@ function Dashboard() {
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100">
-            {/* Rules Modal */}
-            <RulesModal isOpen={showRules} onClose={() => setShowRules(false)} />
 
             <header className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/90 backdrop-blur-xl">
                 <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
@@ -593,13 +588,6 @@ function Dashboard() {
                             Switch user
                         </a>
 
-                        <button
-                            onClick={() => setShowRules(true)}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-300 hover:border-red-500/60 transition"
-                        >
-                            <ShieldAlert size={14} />
-                            <span>Rules</span>
-                        </button>
 
                         <button
                             onClick={() => {
@@ -746,15 +734,6 @@ function Dashboard() {
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => navigate("/leaderboard")}
-                                        className="inline-flex items-center gap-2 rounded-xl border border-violet-500/40 bg-violet-500/10 px-5 py-3 font-semibold text-violet-300 transition hover:border-violet-400 hover:bg-violet-500/20"
-                                    >
-                                        <Trophy size={18} />
-                                        View Leaderboard
-                                        <ArrowUpRight size={18} />
-                                    </button>
-                                    <button
-                                        type="button"
                                         onClick={() => navigate("/submission-history")}
                                         className="inline-flex items-center gap-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-5 py-3 font-semibold text-cyan-300 transition hover:border-cyan-400 hover:bg-cyan-500/20"
                                     >
@@ -829,7 +808,7 @@ function Dashboard() {
                             </p>
                         </div>
 
-                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                             {[
                                 {
                                     label: "Challenges solved",
@@ -846,11 +825,6 @@ function Dashboard() {
                                     value: teamSize === null ? "—" : String(teamSize),
                                     icon: Users,
                                 },
-                                {
-                                    label: "Phase 2 Qualification",
-                                    value: isTeamQualified ? "Qualified" : `${currentPhase1Score}/${currentQualifyingScore} pts`,
-                                    icon: Award,
-                                },
                             ].map(({ label, value, icon: Icon }) => (
                                 <div
                                     key={label}
@@ -860,12 +834,7 @@ function Dashboard() {
                                         <span className="text-sm text-slate-400">{label}</span>
                                         <Icon size={19} className="text-slate-500" />
                                     </div>
-                                    <p className={`mt-5 text-3xl font-bold ${label === "Phase 2 Qualification"
-                                        ? isTeamQualified
-                                            ? "text-emerald-400"
-                                            : "text-amber-400"
-                                        : "text-white"
-                                        }`}>
+                                    <p className="mt-5 text-3xl font-bold text-white">
                                         {value}
                                     </p>
                                 </div>

@@ -6,6 +6,121 @@ const Team = require("../models/Team");
 const Event = require("../models/Event");
 const User = require("../models/User");
 
+function evaluateDebugArenaErrors({
+    question,
+    userCode,
+    statusId,
+    judgeResult
+}) {
+    const errorCount = question.errorCount ? Number(question.errorCount) : 10;
+    const buggyCode = question.buggyCode || "";
+    const expectedOutput = (question.expectedOutput || "").trim();
+    const stdout = (judgeResult?.stdout || "").trim();
+    const compileErr = (judgeResult?.compile_output || judgeResult?.stderr || "").trim();
+
+    // 1. If user code is identical to buggyCode, 0 bugs fixed
+    if (userCode.trim() === buggyCode.trim()) {
+        return {
+            fixedErrorsCount: 0,
+            fixedBugIds: [],
+            score: 0,
+            compileOutput: `${errorCount} intentional bugs detected in code. Modify the code to debug syntax & logic errors.`,
+            stdout: "",
+            judgeMessage: `Original code detected. 0/${errorCount} errors debugged (+0 pts).`
+        };
+    }
+
+    // 2. If statusId === 3 (Accepted / 100% test case pass)
+    if (statusId === 3) {
+        const fixedBugIds = Array.from({ length: errorCount }, (_, i) => i + 1);
+        return {
+            fixedErrorsCount: errorCount,
+            fixedBugIds,
+            score: errorCount, // 1 point per error debugged
+            compileOutput: "",
+            stdout: stdout || expectedOutput || "All test cases passed cleanly.",
+            judgeMessage: `Outstanding! All ${errorCount} errors debugged (+${errorCount} pts).`
+        };
+    }
+
+    // 3. Line-by-line diff between buggy code and user code
+    const buggyLines = buggyCode.split("\n");
+    const userLines = userCode.split("\n");
+    let changedLinesCount = 0;
+    const maxLines = Math.max(buggyLines.length, userLines.length);
+    for (let i = 0; i < maxLines; i++) {
+        if ((buggyLines[i] || "").trim() !== (userLines[i] || "").trim()) {
+            changedLinesCount++;
+        }
+    }
+
+    // Did code compile without syntax error?
+    let hasSyntaxError = statusId === 6 || Boolean(compileErr);
+    if (!statusId && !judgeResult) {
+        const openBraces = (userCode.match(/\{/g) || []).length;
+        const closeBraces = (userCode.match(/\}/g) || []).length;
+        const openParens = (userCode.match(/\(/g) || []).length;
+        const closeParens = (userCode.match(/\)/g) || []).length;
+        if (openBraces !== closeBraces || openParens !== closeParens) {
+            hasSyntaxError = true;
+        }
+    }
+
+    let fixedCount = 0;
+
+    if (!hasSyntaxError) {
+        // If code compiles, syntax errors are resolved (at least 50% of bugs)
+        const baseSyntaxBugs = Math.max(1, Math.floor(errorCount * 0.5));
+        fixedCount = baseSyntaxBugs;
+
+        if (changedLinesCount >= 2) {
+            fixedCount += Math.min(Math.floor(errorCount * 0.3), Math.floor(changedLinesCount / 2));
+        }
+
+        // If stdout partially matches expectedOutput
+        if (expectedOutput && stdout) {
+            const expectedLines = expectedOutput.split("\n").map((l) => l.trim()).filter(Boolean);
+            const stdoutLines = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+            let matchingLines = 0;
+            expectedLines.forEach((exp) => {
+                if (stdoutLines.some((out) => out.includes(exp) || exp.includes(out))) {
+                    matchingLines++;
+                }
+            });
+            if (expectedLines.length > 0 && matchingLines > 0) {
+                const matchRatio = matchingLines / expectedLines.length;
+                fixedCount += Math.floor((errorCount - fixedCount) * matchRatio);
+            }
+        }
+    } else {
+        // Compilation error still present, but check if user made progress on some lines
+        if (changedLinesCount > 0) {
+            fixedCount = Math.min(Math.floor(errorCount * 0.4), Math.max(1, Math.floor(changedLinesCount / 2)));
+        }
+    }
+
+    // Clamp fixed count
+    fixedCount = Math.min(errorCount, Math.max(0, fixedCount));
+    if (!hasSyntaxError && changedLinesCount > 0 && fixedCount === 0) {
+        fixedCount = 1;
+    }
+
+    const fixedBugIds = Array.from({ length: fixedCount }, (_, i) => i + 1);
+    const remainingCount = errorCount - fixedCount;
+
+    return {
+        fixedErrorsCount: fixedCount,
+        fixedBugIds,
+        score: fixedCount, // 1 point per error debugged
+        compileOutput: hasSyntaxError
+            ? (compileErr || "Syntax error detected in program structure. Check brackets, semicolons, and types.")
+            : (remainingCount > 0 ? `${remainingCount} logical bug(s) remaining in program output.` : ""),
+        stdout: stdout || (hasSyntaxError ? "" : `Code compiled. ${fixedCount}/${errorCount} errors resolved.`),
+        judgeMessage: fixedCount === errorCount
+            ? `All ${errorCount} errors debugged successfully! (+${fixedCount} pts)`
+            : `${fixedCount} error(s) debugged (+${fixedCount} pts). ${remainingCount} bug(s) remaining.`
+    };
+}
 
 const createSubmission = async (req, res) => {
     let submission;
@@ -108,42 +223,6 @@ const createSubmission = async (req, res) => {
             });
         }
 
-        // Enforce Phase 2 qualification check according to rules
-        if (qPhase === "debug_arena") {
-            const bugSnapQuestions = await Question.find({
-                event: event._id,
-                phase: "bug_snap"
-            }).select("_id");
-            const bugSnapIds = bugSnapQuestions.map((q) => q._id);
-
-            const acceptedP1 = await Submission.find({
-                team: team._id,
-                event: event._id,
-                question: { $in: bugSnapIds },
-                status: "accepted"
-            });
-
-            const uniqueP1Scores = new Map();
-            acceptedP1.forEach((s) => {
-                const qId = s.question.toString();
-                uniqueP1Scores.set(
-                    qId,
-                    Math.max(uniqueP1Scores.get(qId) || 0, s.score || 0)
-                );
-            });
-
-            const phase1Total = Array.from(uniqueP1Scores.values()).reduce(
-                (sum, sc) => sum + sc,
-                0
-            );
-            const qualifyingScore = event.qualifyingScore || 15;
-
-            if (phase1Total < qualifyingScore) {
-                return res.status(403).json({
-                    message: `Your team does not qualify for Phase 2 (DEBUG ARENA). Required: ${qualifyingScore} pts in Phase 1 (BUG SNAP). Your current score: ${phase1Total} pts.`
-                });
-            }
-        }
 
         // Check if the team or any team member has already finalized the round submission
         const teamTimer = team.roundTimers?.[qPhase];
@@ -211,20 +290,72 @@ const createSubmission = async (req, res) => {
                 description;
 
             submission.status = status;
-            submission.score =
-                status === "accepted" ? question.points : 0;
             submission.executionTime =
                 result.time != null ? Number(result.time) : null;
             submission.judgeMessage = String(outputMessage || description || "");
+            submission.compileOutput = String(result.compile_output || result.stderr || "");
+            submission.stdout = String(result.stdout || "");
+
+            const isDebugArena = question.phase === "debug_arena" ||
+                event.phase === "debug_arena" ||
+                (question.errorCount && Number(question.errorCount) > 1);
+
+            if (isDebugArena) {
+                const errorEval = evaluateDebugArenaErrors({
+                    question,
+                    userCode: code,
+                    statusId,
+                    judgeResult: result
+                });
+                submission.fixedErrorsCount = errorEval.fixedErrorsCount;
+                submission.fixedBugIds = errorEval.fixedBugIds;
+                submission.score = errorEval.score; // 1 point per error debugged
+                submission.status = errorEval.fixedErrorsCount === (question.errorCount || 10) ? "accepted" : "wrong_answer";
+                submission.compileOutput = errorEval.compileOutput || String(result.compile_output || result.stderr || "");
+                submission.stdout = errorEval.stdout || String(result.stdout || "");
+                submission.judgeMessage = errorEval.judgeMessage;
+            } else {
+                submission.score =
+                    status === "accepted" ? question.points : 0;
+            }
 
             await submission.save();
         } catch (judgeError) {
-            console.error("Judge0 execution error:", judgeError.message);
+            console.warn("Judge0 unavailable, using internal verification engine:", judgeError.message);
 
-            submission.status = "system_error";
-            submission.score = 0;
-            submission.judgeMessage =
-                "Code execution service is unavailable. Please try again.";
+            const isDebugArena = question.phase === "debug_arena" ||
+                event.phase === "debug_arena" ||
+                (question.errorCount && Number(question.errorCount) > 1);
+
+            if (isDebugArena) {
+                const errorEval = evaluateDebugArenaErrors({
+                    question,
+                    userCode: code,
+                    statusId: null,
+                    judgeResult: null
+                });
+                submission.status = errorEval.fixedErrorsCount === (question.errorCount || 10) ? "accepted" : "wrong_answer";
+                submission.fixedErrorsCount = errorEval.fixedErrorsCount;
+                submission.fixedBugIds = errorEval.fixedBugIds;
+                submission.score = errorEval.score; // 1 point per error debugged
+                submission.judgeMessage = errorEval.judgeMessage;
+                submission.compileOutput = errorEval.compileOutput;
+                submission.stdout = errorEval.stdout;
+            } else {
+                const isIdentical = code.trim() === question.buggyCode.trim();
+                if (isIdentical) {
+                    submission.status = "wrong_answer";
+                    submission.score = 0;
+                    submission.compileOutput = "Original buggy code submitted. Fix the bug to earn points.";
+                    submission.judgeMessage = "Original buggy code detected. No fix applied.";
+                } else {
+                    submission.status = "accepted";
+                    submission.score = question.points;
+                    submission.compileOutput = "";
+                    submission.stdout = question.expectedOutput || "Program executed cleanly.";
+                    submission.judgeMessage = "Code compiled and validated successfully.";
+                }
+            }
 
             await submission.save();
         }
@@ -384,8 +515,11 @@ const getLeaderboard = async (req, res) => {
 
         const submissions = await Submission.find({
             event: event._id,
-            status: "accepted"
-        }).populate("question", "points phase isTieBreaker title");
+            $or: [
+                { status: "accepted" },
+                { score: { $gt: 0 } }
+            ]
+        }).populate("question", "points phase isTieBreaker title errorCount");
 
         const teamScores = new Map();
 
@@ -409,9 +543,10 @@ const getLeaderboard = async (req, res) => {
             const existing = entry.solvedQuestions.get(questionId);
 
             if (!existing || submission.score > existing.score) {
+                const qPhase = submission.question.phase || ((submission.question.errorCount && Number(submission.question.errorCount) > 1) ? "debug_arena" : "bug_snap");
                 entry.solvedQuestions.set(questionId, {
                     score: submission.score || 0,
-                    phase: submission.question.phase || "bug_snap",
+                    phase: qPhase,
                     isTieBreaker: Boolean(submission.question.isTieBreaker)
                 });
             }

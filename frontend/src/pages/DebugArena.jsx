@@ -19,12 +19,28 @@ import {
     Lock,
     ShieldCheck
 } from "lucide-react";
-import RulesModal from "../components/RulesModal";
 import RoundTimer from "../components/RoundTimer";
 import { getAuthToken } from "../utils/auth";
 import { API_BASE_URL } from "../config/api";
 
 const API = API_BASE_URL;
+
+const ARENA_LANGUAGES = [
+    { id: "c", label: "C", tag: "GCC 9.2", icon: "⚙️", color: "blue" },
+    { id: "cpp", label: "C++", tag: "G++ 9.2", icon: "⚡", color: "sky" },
+    { id: "python", label: "Python", tag: "Python 3.8", icon: "🐍", color: "emerald" },
+    { id: "java", label: "Java", tag: "OpenJDK 13", icon: "☕", color: "amber" },
+    { id: "javascript", label: "JavaScript", tag: "Node.js 12", icon: "🌐", color: "yellow" },
+];
+
+const normalizeLang = (lang) => {
+    if (!lang) return "";
+    const l = lang.toLowerCase().trim();
+    if (l === "c++" || l === "cpp") return "cpp";
+    if (l === "js" || l === "javascript") return "javascript";
+    if (l === "py" || l === "python") return "python";
+    return l;
+};
 
 function DebugArena() {
     const navigate = useNavigate();
@@ -32,6 +48,7 @@ function DebugArena() {
     const [user, setUser] = useState(null);
     const [activeEvent, setActiveEvent] = useState(null);
     const [questions, setQuestions] = useState([]);
+    const [selectedLanguage, setSelectedLanguage] = useState("c");
     const [codes, setCodes] = useState({});
     const [loading, setLoading] = useState(true);
     const [submittingId, setSubmittingId] = useState(null);
@@ -39,7 +56,9 @@ function DebugArena() {
     const [error, setError] = useState("");
     const [qualificationData, setQualificationData] = useState(null);
     const [checkedBugs, setCheckedBugs] = useState({});
-    const [showRules, setShowRules] = useState(false);
+    const [fixedBugsMap, setFixedBugsMap] = useState({});
+    const [compilingId, setCompilingId] = useState(null);
+    const [compileOutputs, setCompileOutputs] = useState({});
     const [submissionHistory, setSubmissionHistory] = useState([]);
 
     // Timer & final submission state
@@ -131,6 +150,17 @@ function DebugArena() {
             const loadedQuestions = qRes.data.questions || [];
             setQuestions(loadedQuestions);
 
+            if (loadedQuestions.length > 0) {
+                setSelectedLanguage((prevLang) => {
+                    const hasCurrent = loadedQuestions.some(
+                        (q) => normalizeLang(q.language) === prevLang
+                    );
+                    if (hasCurrent) return prevLang;
+                    const firstMatch = normalizeLang(loadedQuestions[0].language);
+                    return firstMatch || prevLang;
+                });
+            }
+
             const initialCodes = {};
             loadedQuestions.forEach((q) => {
                 initialCodes[q._id] = q.buggyCode;
@@ -144,14 +174,37 @@ function DebugArena() {
             const subs = subRes.data.submissions || [];
             setSubmissionHistory(subs);
 
-            // Populate accepted results
+            // Populate results and debugged bugs
             const initialResults = {};
+            const initialFixedBugs = {};
+            const initialCompileOutputs = {};
             subs.forEach((sub) => {
-                if (sub.status === "accepted" && sub.question?._id) {
-                    initialResults[sub.question._id] = sub;
+                if (sub.question?._id) {
+                    const qId = sub.question._id;
+                    if (!initialResults[qId] || (sub.score || 0) > (initialResults[qId].score || 0)) {
+                        initialResults[qId] = sub;
+                    }
+                    if (Array.isArray(sub.fixedBugIds) && sub.fixedBugIds.length > 0) {
+                        if (!initialFixedBugs[qId] || sub.fixedBugIds.length > initialFixedBugs[qId].length) {
+                            initialFixedBugs[qId] = sub.fixedBugIds;
+                        }
+                    } else if (sub.status === "accepted") {
+                        const errCnt = sub.question.errorCount || 10;
+                        initialFixedBugs[qId] = Array.from({ length: errCnt }, (_, i) => i + 1);
+                    }
+                    if (!initialCompileOutputs[qId] && (sub.compileOutput || sub.stdout)) {
+                        initialCompileOutputs[qId] = {
+                            compileOutput: sub.compileOutput || "",
+                            stdout: sub.stdout || "",
+                            status: sub.status,
+                            judgeMessage: sub.judgeMessage || ""
+                        };
+                    }
                 }
             });
             setResults(initialResults);
+            setFixedBugsMap(initialFixedBugs);
+            setCompileOutputs(initialCompileOutputs);
         } catch (err) {
             setError(
                 err.response?.data?.message ||
@@ -191,9 +244,9 @@ function DebugArena() {
         }));
     };
 
-    const handleSubmit = async (question) => {
+    const handleCompile = async (question) => {
         if (isFinalSubmitted) {
-            alert("This round has concluded and final submissions are locked.");
+            alert("This round has concluded and code editing is locked.");
             return;
         }
 
@@ -201,10 +254,11 @@ function DebugArena() {
         const currentCode = codes[question._id];
 
         if (!currentCode || !currentCode.trim()) {
-            alert("Code cannot be empty.");
+            alert("Code cannot be empty. Please enter your code to compile.");
             return;
         }
 
+        setCompilingId(question._id);
         setSubmittingId(question._id);
 
         try {
@@ -221,9 +275,28 @@ function DebugArena() {
             );
 
             const submission = response.data.submission;
+            const fixedBugIds = submission?.fixedBugIds || response.data.fixedBugIds || [];
+            const compileOut = submission?.compileOutput != null ? submission.compileOutput : (response.data.compileOutput || "");
+            const stdOut = submission?.stdout != null ? submission.stdout : (response.data.stdout || "");
+
             setResults((prev) => ({
                 ...prev,
                 [question._id]: submission
+            }));
+
+            setFixedBugsMap((prev) => ({
+                ...prev,
+                [question._id]: fixedBugIds
+            }));
+
+            setCompileOutputs((prev) => ({
+                ...prev,
+                [question._id]: {
+                    compileOutput: compileOut,
+                    stdout: stdOut,
+                    status: submission.status,
+                    judgeMessage: submission.judgeMessage || ""
+                }
             }));
 
             // Refresh submissions history
@@ -234,7 +307,7 @@ function DebugArena() {
         } catch (err) {
             const msg =
                 err.response?.data?.message ||
-                "Execution failed. Please check Judge0 or server connection.";
+                "Compilation failed. Please check server connection.";
             setResults((prev) => ({
                 ...prev,
                 [question._id]: {
@@ -243,7 +316,17 @@ function DebugArena() {
                     score: 0
                 }
             }));
+            setCompileOutputs((prev) => ({
+                ...prev,
+                [question._id]: {
+                    compileOutput: msg,
+                    stdout: "",
+                    status: "system_error",
+                    judgeMessage: msg
+                }
+            }));
         } finally {
+            setCompilingId(null);
             setSubmittingId(null);
         }
     };
@@ -380,11 +463,16 @@ function DebugArena() {
     const isQualified = myTeam ? myTeam.isQualified : false;
     const phase1Score = myTeam ? myTeam.phase1Score : 0;
     const isPhase2Live = activeEvent?.status === "live" && activeEvent?.phase === "debug_arena";
-    const canAccessChallenges = (isPhase2Live || isOrganizer) && (isQualified || isOrganizer);
+    const canAccessChallenges = isPhase2Live || isOrganizer;
+
+    const displayedQuestions = questions.filter(
+        (q) => normalizeLang(q.language) === selectedLanguage
+    );
+    const currentLangConfig =
+        ARENA_LANGUAGES.find((l) => l.id === selectedLanguage) || ARENA_LANGUAGES[0];
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100">
-            <RulesModal isOpen={showRules} onClose={() => setShowRules(false)} />
 
             {/* Header */}
             <header className="sticky top-0 z-30 border-b border-slate-800 bg-slate-950/90 backdrop-blur-xl">
@@ -413,21 +501,16 @@ function DebugArena() {
                     </div>
 
                     <div className="flex items-center gap-3">
-                        <button
-                            onClick={() => setShowRules(true)}
-                            className="inline-flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3.5 py-2 text-xs font-semibold text-red-300 transition hover:border-red-500/60"
-                        >
-                            <ShieldAlert size={14} />
-                            <span className="hidden sm:inline">Event Rules</span>
-                        </button>
 
-                        <button
-                            onClick={() => navigate("/leaderboard")}
-                            className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition hover:border-blue-500"
-                        >
-                            <Trophy size={14} className="text-amber-400" />
-                            <span className="hidden sm:inline">Leaderboard</span>
-                        </button>
+                        {isOrganizer && (
+                            <button
+                                onClick={() => navigate("/leaderboard")}
+                                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white transition hover:border-blue-500"
+                            >
+                                <Trophy size={14} className="text-amber-400" />
+                                <span className="hidden sm:inline">Leaderboard</span>
+                            </button>
+                        )}
 
                         <button
                             onClick={fetchArenaData}
@@ -583,26 +666,6 @@ function DebugArena() {
                             </button>
                         </div>
                     </div>
-                ) : !isQualified && !isOrganizer ? (
-                    /* Did not meet qualification score */
-                    <div className="rounded-3xl border border-red-500/30 bg-red-500/10 p-8 text-center max-w-2xl mx-auto my-12">
-                        <Lock className="mx-auto mb-4 text-red-400" size={48} />
-                        <h2 className="text-2xl font-bold text-white">Phase 2 Qualification Required</h2>
-                        <p className="mt-3 text-slate-300 text-sm leading-relaxed">
-                            According to the tournament rules, only teams reaching the minimum qualifying score of <strong>{qualifyingScore} points</strong> in Phase 1 (BUG SNAP) advance to Phase 2 (DEBUG ARENA).
-                        </p>
-                        <p className="mt-2 text-xs text-red-300 font-semibold">
-                            Your team earned {phase1Score} / {qualifyingScore} points in Phase 1.
-                        </p>
-                        <div className="mt-6 flex justify-center gap-3">
-                            <button
-                                onClick={() => navigate("/dashboard")}
-                                className="rounded-xl border border-slate-700 bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:border-slate-500"
-                            >
-                                Return to Dashboard
-                            </button>
-                        </div>
-                    </div>
                 ) : questions.length === 0 ? (
                     <div className="rounded-2xl border border-slate-800 bg-slate-900/60 p-12 text-center">
                         <Code2 className="mx-auto mb-3 text-slate-500" size={36} />
@@ -620,233 +683,508 @@ function DebugArena() {
                         )}
                     </div>
                 ) : (
-                    /* Questions Grid / List */
-                    <div className="space-y-8">
-                        {questions.map((question, qIdx) => {
-                            const result = results[question._id];
-                            const isAccepted = result?.status === "accepted";
-                            const isSubmitting = submittingId === question._id;
-
-                            // Mock bug checklist based on errorCount
-                            const errorCount = question.errorCount || 10;
-                            const bugList = Array.from({ length: Math.min(errorCount, 15) }, (_, i) => ({
-                                id: i + 1,
-                                label: `Bug #${i + 1} (${question.errorTypes?.[i % (question.errorTypes?.length || 1)] || "Syntax/Logic"})`
-                            }));
-
-                            return (
-                                <article
-                                    key={question._id}
-                                    className={`rounded-3xl border transition-all ${isAccepted
-                                        ? "border-emerald-500/40 bg-emerald-950/10 shadow-lg shadow-emerald-500/5"
-                                        : "border-slate-800 bg-slate-900/60 hover:border-slate-700"
-                                        } p-6 sm:p-8`}
-                                >
-                                    {/* Question Header */}
-                                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 pb-6 border-b border-slate-800">
-                                        <div>
-                                            <div className="flex flex-wrap items-center gap-2 mb-2">
-                                                <span className="rounded-lg bg-violet-500/10 border border-violet-500/20 px-2.5 py-1 text-xs font-bold text-violet-400 uppercase">
-                                                    Challenge #{qIdx + 1}
-                                                </span>
-                                                <span className="rounded-lg bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-300 uppercase">
-                                                    {question.language}
-                                                </span>
-                                                <span className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 text-xs font-bold text-amber-400 uppercase">
-                                                    {question.difficulty} — {question.points} pts
-                                                </span>
-                                                <span className="rounded-lg bg-red-500/10 border border-red-500/20 px-2.5 py-1 text-xs font-bold text-red-400">
-                                                    🐛 {errorCount} Intentional Bugs
-                                                </span>
-                                                {question.isTieBreaker && (
-                                                    <span className="rounded-lg bg-amber-400/20 border border-amber-400/40 px-2.5 py-1 text-xs font-black text-amber-300 animate-pulse">
-                                                        ⚡ TIE-BREAKER QUESTION
-                                                    </span>
-                                                )}
-                                            </div>
-
-                                            <h2 className="text-xl sm:text-2xl font-bold text-white">
-                                                {question.title}
-                                            </h2>
-                                            <p className="mt-2 text-sm text-slate-400 leading-relaxed max-w-3xl">
-                                                {question.description}
-                                            </p>
+                    /* Main Two-Column Layout: Left (Code/Challenges), Right (Language Options) */
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                        {/* Main Challenges Section - Left Column */}
+                        <div className="lg:col-span-8 xl:col-span-9 space-y-6">
+                            {/* Active Language Status Banner */}
+                            <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-md backdrop-blur-sm">
+                                <div className="flex items-center gap-3">
+                                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-500/10 border border-violet-500/30 text-2xl">
+                                        {currentLangConfig.icon}
+                                    </div>
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <h3 className="font-bold text-white text-base">
+                                                {currentLangConfig.label} Workspace
+                                            </h3>
+                                            <span className="rounded-md bg-slate-800 px-2 py-0.5 text-[11px] font-semibold text-slate-300">
+                                                {currentLangConfig.tag}
+                                            </span>
                                         </div>
+                                        <p className="text-xs text-slate-400 mt-0.5">
+                                            {displayedQuestions.length > 0
+                                                ? `Displaying ${displayedQuestions.length} ${currentLangConfig.label} ${displayedQuestions.length === 1 ? "challenge" : "challenges"}. Inspect and debug below.`
+                                                : `No active challenges found for ${currentLangConfig.label}. Select another language on the right.`}
+                                        </p>
+                                    </div>
+                                </div>
 
-                                        <div className="shrink-0 flex items-center gap-3">
-                                            {isAccepted ? (
-                                                <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 px-4 py-2 text-emerald-400 text-sm font-bold">
-                                                    <CheckCircle2 size={18} />
-                                                    Solved (+{question.points} pts)
-                                                </div>
-                                            ) : (
+                                <div className="flex items-center gap-2 self-start sm:self-center">
+                                    <span className="text-xs text-slate-400">
+                                        Current Filter:
+                                    </span>
+                                    <span className="rounded-lg border border-violet-500/40 bg-violet-500/15 px-3 py-1 text-xs font-bold text-violet-300">
+                                        {currentLangConfig.label}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Displayed Questions or Empty State for this Language */}
+                            {displayedQuestions.length === 0 ? (
+                                <div className="rounded-3xl border border-slate-800 bg-slate-900/40 p-10 text-center backdrop-blur-sm">
+                                    <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-800 bg-slate-900 text-slate-500">
+                                        <Code2 size={28} />
+                                    </div>
+                                    <h3 className="text-lg font-bold text-slate-200">
+                                        No {currentLangConfig.label} Challenges Found
+                                    </h3>
+                                    <p className="mt-2 text-sm text-slate-400 max-w-md mx-auto">
+                                        There are no Debug Arena questions published in {currentLangConfig.label}. Choose a language option on the right to view available code challenges.
+                                    </p>
+                                    <div className="mt-6 flex flex-wrap justify-center gap-2">
+                                        {ARENA_LANGUAGES.filter((l) =>
+                                            questions.some((q) => normalizeLang(q.language) === l.id)
+                                        ).map((l) => {
+                                            const c = questions.filter(
+                                                (q) => normalizeLang(q.language) === l.id
+                                            ).length;
+                                            return (
                                                 <button
-                                                    onClick={() => handleResetCode(question)}
-                                                    disabled={isFinalSubmitted}
-                                                    className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white hover:border-slate-500 transition disabled:opacity-50"
+                                                    key={l.id}
+                                                    type="button"
+                                                    onClick={() => setSelectedLanguage(l.id)}
+                                                    className="inline-flex items-center gap-1.5 rounded-xl border border-violet-500/40 bg-violet-500/10 hover:bg-violet-500/20 px-4 py-2 text-xs font-bold text-violet-300 transition"
                                                 >
-                                                    <RefreshCw size={14} />
-                                                    Reset Original Code
+                                                    <span>{l.icon}</span>
+                                                    <span>Switch to {l.label} ({c})</span>
                                                 </button>
-                                            )}
-                                        </div>
+                                            );
+                                        })}
                                     </div>
+                                </div>
+                            ) : (
+                                displayedQuestions.map((question, qIdx) => {
+                                    const result = results[question._id];
+                                    const isAccepted = result?.status === "accepted";
+                                    const isSubmitting = submittingId === question._id;
 
-                                    {/* Bug Tracker Checklist */}
-                                    <div className="my-6 rounded-2xl border border-slate-800/80 bg-slate-950/70 p-4 sm:p-5">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                                                Bug Hunting Progress ({Object.keys(checkedBugs).filter(k => k.startsWith(question._id) && checkedBugs[k]).length}/{bugList.length} Identified)
-                                            </span>
-                                            <span className="text-xs text-slate-500">
-                                                Click to mark bugs you've located & fixed
-                                            </span>
-                                        </div>
-                                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-                                            {bugList.map((bug) => {
-                                                const isChecked = Boolean(checkedBugs[`${question._id}_${bug.id}`]);
-                                                return (
-                                                    <button
-                                                        key={bug.id}
-                                                        type="button"
-                                                        disabled={isFinalSubmitted}
-                                                        onClick={() => toggleBugCheck(question._id, bug.id)}
-                                                        className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-left transition border ${isChecked
-                                                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
-                                                            : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700"
-                                                            } ${isFinalSubmitted ? "opacity-75 cursor-default" : ""}`}
-                                                    >
-                                                        {isChecked ? (
-                                                            <CheckSquare size={14} className="text-emerald-400 shrink-0" />
-                                                        ) : (
-                                                            <Square size={14} className="text-slate-500 shrink-0" />
-                                                        )}
-                                                        <span className="truncate">{bug.label}</span>
-                                                    </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
+                                    // Multi-bug checklist based on errorCount
+                                    const errorCount = question.errorCount ? Number(question.errorCount) : 10;
+                                    const bugList = Array.from({ length: Math.min(errorCount, 15) }, (_, i) => ({
+                                        id: i + 1,
+                                        label: `Bug #${i + 1} (${question.errorTypes?.[i % (question.errorTypes?.length || 1)] || "Syntax/Logic"})`
+                                    }));
 
-                                    {/* Code Editor */}
-                                    <div className="space-y-2">
-                                        <div className="flex items-center justify-between text-xs text-slate-400 px-1">
-                                            <span className="font-mono flex items-center gap-1.5">
-                                                <Terminal size={14} className="text-violet-400" />
-                                                Interactive Debugger Workspace ({question.language})
-                                            </span>
-                                            <span>
-                                                {isFinalSubmitted
-                                                    ? "Submissions locked • Round ended"
-                                                    : "Type fixes directly into the code"}
-                                            </span>
-                                        </div>
+                                    const currentFixedBugIds = fixedBugsMap[question._id] || (isAccepted ? bugList.map(b => b.id) : (result?.fixedBugIds || []));
+                                    const fixedCount = currentFixedBugIds.length;
+                                    const earnedScore = result?.score != null ? result.score : fixedCount;
+                                    const isCompiling = compilingId === question._id || isSubmitting;
+                                    const currentCompileOut = compileOutputs[question._id];
 
-                                        <div className="relative rounded-2xl border border-slate-800 bg-slate-950 overflow-hidden focus-within:border-violet-500/80">
-                                            <textarea
-                                                rows={14}
-                                                spellCheck={false}
-                                                autoComplete="off"
-                                                autoCorrect="off"
-                                                autoCapitalize="off"
-                                                readOnly={isFinalSubmitted}
-                                                value={codes[question._id] ?? ""}
-                                                onChange={(e) => handleCodeChange(question._id, e.target.value)}
-                                                onPaste={(e) => {
-                                                    if (!isOrganizer) {
-                                                        e.preventDefault();
-                                                    }
-                                                }}
-                                                onCopy={(e) => e.preventDefault()}
-                                                onCut={(e) => e.preventDefault()}
-                                                className={`w-full bg-transparent p-4 sm:p-5 font-mono text-xs sm:text-sm leading-6 outline-none resize-y selection:bg-violet-500/30 ${isFinalSubmitted
-                                                    ? "text-slate-400 cursor-not-allowed bg-slate-950/80"
-                                                    : "text-slate-200"
-                                                    }`}
-                                                placeholder={
-                                                    isFinalSubmitted
-                                                        ? "// Round finalized. Code editing is locked."
-                                                        : "// Inspect and fix the bugs in this program..."
-                                                }
-                                            />
-                                        </div>
-                                    </div>
-
-                                    {/* Execution Result Box */}
-                                    {result && (
-                                        <div
-                                            className={`mt-5 rounded-2xl border p-4 sm:p-5 text-sm ${isAccepted
-                                                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-                                                : result.status === "pending"
-                                                    ? "border-amber-500/40 bg-amber-500/10 text-amber-200"
-                                                    : "border-red-500/40 bg-red-500/10 text-red-200"
-                                                }`}
+                                    return (
+                                        <article
+                                            key={question._id}
+                                            className={`rounded-3xl border transition-all ${isAccepted
+                                                ? "border-emerald-500/40 bg-emerald-950/10 shadow-lg shadow-emerald-500/5"
+                                                : "border-slate-800 bg-slate-900/60 hover:border-slate-700"
+                                                } p-6 sm:p-8`}
                                         >
-                                            <div className="flex items-center gap-2 font-bold mb-1">
-                                                {isAccepted ? (
-                                                    <CheckCircle2 size={18} className="text-emerald-400" />
-                                                ) : (
-                                                    <XCircle size={18} className="text-red-400" />
-                                                )}
-                                                <span className="uppercase tracking-wide">
-                                                    Status: {result.status?.replace("_", " ") || "Evaluated"}
-                                                </span>
-                                                <span className="ml-auto text-xs font-mono">
-                                                    Score: {result.score || 0} pts
-                                                </span>
+                                            {/* Question Header */}
+                                            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 pb-6 border-b border-slate-800">
+                                                <div>
+                                                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                        <span className="rounded-lg bg-violet-500/10 border border-violet-500/20 px-2.5 py-1 text-xs font-bold text-violet-400 uppercase">
+                                                            Challenge #{qIdx + 1}
+                                                        </span>
+                                                        <span className="rounded-lg bg-slate-800 px-2.5 py-1 text-xs font-semibold text-slate-300 uppercase">
+                                                            {question.language}
+                                                        </span>
+                                                        <span className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 text-xs font-bold text-amber-400 uppercase">
+                                                            {question.difficulty} — {question.points} pts
+                                                        </span>
+                                                        <span className="rounded-lg bg-red-500/10 border border-red-500/20 px-2.5 py-1 text-xs font-bold text-red-400">
+                                                            🐛 {errorCount} Intentional Bugs
+                                                        </span>
+                                                        {fixedCount > 0 && (
+                                                            <span className="rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-xs font-bold text-emerald-400">
+                                                                ✓ {fixedCount}/{bugList.length} Debugged (+{earnedScore} pts)
+                                                            </span>
+                                                        )}
+                                                        {question.isTieBreaker && (
+                                                            <span className="rounded-lg bg-amber-400/20 border border-amber-400/40 px-2.5 py-1 text-xs font-black text-amber-300 animate-pulse">
+                                                                ⚡ TIE-BREAKER QUESTION
+                                                            </span>
+                                                        )}
+                                                    </div>
+
+                                                    <h2 className="text-xl sm:text-2xl font-bold text-white">
+                                                        {question.title}
+                                                    </h2>
+                                                    <p className="mt-2 text-sm text-slate-400 leading-relaxed max-w-3xl">
+                                                        {question.description}
+                                                    </p>
+                                                </div>
+
+                                                <div className="shrink-0 flex items-center gap-3">
+                                                    {isAccepted ? (
+                                                        <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 px-4 py-2 text-emerald-400 text-sm font-bold">
+                                                            <CheckCircle2 size={18} />
+                                                            Solved (+{earnedScore} pts)
+                                                        </div>
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => handleResetCode(question)}
+                                                            disabled={isFinalSubmitted}
+                                                            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white hover:border-slate-500 transition disabled:opacity-50"
+                                                        >
+                                                            <RefreshCw size={14} />
+                                                            Reset Original Code
+                                                        </button>
+                                                    )}
+                                                </div>
                                             </div>
 
-                                            {result.judgeMessage && (
-                                                <pre className="mt-2 rounded-xl bg-slate-950/80 p-3 font-mono text-xs overflow-x-auto text-slate-300 border border-slate-800/80 max-h-40">
-                                                    {result.judgeMessage}
-                                                </pre>
-                                            )}
-                                        </div>
-                                    )}
+                                            {/* Bug Tracker with Automatic Tick Marks & Points */}
+                                            <div className="my-6 rounded-2xl border border-slate-800/80 bg-slate-950/70 p-4 sm:p-5">
+                                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3.5">
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                                                                Bugs Debugged:
+                                                            </span>
+                                                            <span className="text-xs font-mono font-bold text-violet-400">
+                                                                {fixedCount} / {bugList.length} Resolved
+                                                            </span>
+                                                            {fixedCount > 0 && (
+                                                                <span className="rounded-md bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-bold text-emerald-400">
+                                                                    +{earnedScore} pts earned
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-[11px] text-slate-400 mt-0.5">
+                                                            Compile your code to evaluate fixes. Each error debugged gives <span className="text-amber-400 font-semibold">1 point</span>.
+                                                        </p>
+                                                    </div>
+                                                    <div className="text-xs font-medium">
+                                                        {isCompiling ? (
+                                                            <span className="inline-flex items-center gap-1.5 text-violet-400 font-semibold animate-pulse">
+                                                                <LoaderCircle size={13} className="animate-spin" />
+                                                                Compiling & checking fixes...
+                                                            </span>
+                                                        ) : fixedCount === bugList.length ? (
+                                                            <span className="inline-flex items-center gap-1.5 text-emerald-400 font-bold">
+                                                                <CheckCircle2 size={14} />
+                                                                All {bugList.length} Errors Debugged!
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-slate-500 text-[11px]">
+                                                                Click <span className="text-violet-300 font-semibold">"Compile Code"</span> below to verify
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
 
-                                    {/* Action Footer */}
-                                    <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-800 pt-5">
-                                        <div className="text-xs text-slate-500">
-                                            Phase 2 rules: Multi-bug programs evaluated via Judge0 test suite.
-                                        </div>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
+                                                    {bugList.map((bug) => {
+                                                        const isFixed = currentFixedBugIds.includes(bug.id);
+                                                        return (
+                                                            <div
+                                                                key={bug.id}
+                                                                className={`flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs transition border ${
+                                                                    isFixed
+                                                                        ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-200 shadow-sm shadow-emerald-500/10"
+                                                                        : "bg-slate-900/90 border-slate-800 text-slate-400"
+                                                                }`}
+                                                            >
+                                                                <div className="flex items-center gap-2 min-w-0">
+                                                                    {isFixed ? (
+                                                                        <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                                                                    ) : (
+                                                                        <div className="w-3.5 h-3.5 rounded-full border border-slate-600 bg-slate-800/80 shrink-0" />
+                                                                    )}
+                                                                    <span className={`truncate ${isFixed ? "font-semibold text-emerald-200" : ""}`}>
+                                                                        {bug.label}
+                                                                    </span>
+                                                                </div>
+                                                                {isFixed ? (
+                                                                    <span className="shrink-0 text-[10px] font-bold text-emerald-400 bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                                                                        ✓ +1 pt
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="shrink-0 text-[10px] text-slate-600 font-mono">
+                                                                        Pending
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
 
-                                        <button
-                                            type="button"
-                                            disabled={isSubmitting || isAccepted || isFinalSubmitted}
-                                            onClick={() => handleSubmit(question)}
-                                            className={`inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-bold text-white transition disabled:cursor-not-allowed ${isFinalSubmitted
-                                                ? "bg-slate-800 text-slate-500 cursor-not-allowed opacity-75"
-                                                : isAccepted
-                                                    ? "bg-emerald-600/50 opacity-80"
-                                                    : "bg-violet-600 hover:bg-violet-500 active:scale-95 shadow-lg shadow-violet-600/20"
-                                                }`}
-                                        >
-                                            {isSubmitting ? (
-                                                <>
-                                                    <LoaderCircle size={16} className="animate-spin" />
-                                                    Evaluating in Judge0...
-                                                </>
-                                            ) : isFinalSubmitted ? (
-                                                <>
-                                                    <Lock size={16} />
-                                                    Round Finalized
-                                                </>
-                                            ) : isAccepted ? (
-                                                <>
-                                                    <CheckCircle2 size={16} />
-                                                    All Bugs Resolved
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Play size={16} />
-                                                    Compile & Submit Solution
-                                                </>
+                                            {/* Code Editor */}
+                                            <div className="space-y-2">
+                                                <div className="flex items-center justify-between text-xs text-slate-400 px-1">
+                                                    <span className="font-mono flex items-center gap-1.5">
+                                                        <Terminal size={14} className="text-violet-400" />
+                                                        Interactive Debugger Workspace ({question.language})
+                                                    </span>
+                                                    <span>
+                                                        {isFinalSubmitted
+                                                            ? "Submissions locked • Round ended"
+                                                            : "Type fixes directly into the code"}
+                                                    </span>
+                                                </div>
+
+                                                <div className="relative rounded-2xl border border-slate-800 bg-slate-950 overflow-hidden focus-within:border-violet-500/80">
+                                                    <textarea
+                                                        rows={14}
+                                                        spellCheck={false}
+                                                        autoComplete="off"
+                                                        autoCorrect="off"
+                                                        autoCapitalize="off"
+                                                        readOnly={isFinalSubmitted}
+                                                        value={codes[question._id] ?? ""}
+                                                        onChange={(e) => handleCodeChange(question._id, e.target.value)}
+                                                        onPaste={(e) => {
+                                                            if (!isOrganizer) {
+                                                                e.preventDefault();
+                                                            }
+                                                        }}
+                                                        onCopy={(e) => e.preventDefault()}
+                                                        onCut={(e) => e.preventDefault()}
+                                                        className={`w-full bg-transparent p-4 sm:p-5 font-mono text-xs sm:text-sm leading-6 outline-none resize-y selection:bg-violet-500/30 ${isFinalSubmitted
+                                                            ? "text-slate-400 cursor-not-allowed bg-slate-950/80"
+                                                            : "text-slate-200"
+                                                            }`}
+                                                        placeholder={
+                                                            isFinalSubmitted
+                                                                ? "// Round finalized. Code editing is locked."
+                                                                : "// Inspect and fix the bugs in this program..."
+                                                        }
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            {/* Compiler Output & Execution Terminal */}
+                                            {(currentCompileOut || result) && (
+                                                <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/90 overflow-hidden shadow-lg">
+                                                    <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 text-xs">
+                                                        <div className="flex items-center gap-2">
+                                                            <Terminal size={14} className="text-violet-400" />
+                                                            <span className="font-bold uppercase tracking-wider text-slate-300">
+                                                                Compilation & Execution Terminal
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex items-center gap-3">
+                                                            <span className="text-xs font-mono text-emerald-400 font-semibold">
+                                                                Score: +{earnedScore} pts ({fixedCount}/{bugList.length} fixed)
+                                                            </span>
+                                                            <span
+                                                                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                                                    isAccepted || fixedCount === bugList.length
+                                                                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                                                                        : fixedCount > 0
+                                                                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
+                                                                            : "bg-slate-800 text-slate-400 border border-slate-700"
+                                                                }`}
+                                                            >
+                                                                {isAccepted || fixedCount === bugList.length
+                                                                    ? "All Bugs Resolved"
+                                                                    : fixedCount > 0
+                                                                        ? `${fixedCount}/${bugList.length} Errors Debugged`
+                                                                        : "Ready for Debugging"}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="p-4 space-y-3 font-mono text-xs">
+                                                        {/* Compiler Output / Errors if any */}
+                                                        {(currentCompileOut?.compileOutput || result?.compileOutput) && (
+                                                            <div>
+                                                                <div className="text-[11px] font-semibold text-rose-400 mb-1">
+                                                                    Compiler Output / Warnings:
+                                                                </div>
+                                                                <pre className="rounded-xl bg-slate-950 p-3 text-rose-300/90 border border-rose-500/20 overflow-x-auto max-h-40 whitespace-pre-wrap">
+                                                                    {currentCompileOut?.compileOutput || result?.compileOutput}
+                                                                </pre>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Standard Output if any */}
+                                                        {(currentCompileOut?.stdout || result?.stdout) && (
+                                                            <div>
+                                                                <div className="text-[11px] font-semibold text-emerald-400 mb-1">
+                                                                    Program Output (stdout):
+                                                                </div>
+                                                                <pre className="rounded-xl bg-slate-950 p-3 text-emerald-300/90 border border-emerald-500/20 overflow-x-auto max-h-40 whitespace-pre-wrap">
+                                                                    {currentCompileOut?.stdout || result?.stdout}
+                                                                </pre>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Judge feedback / message */}
+                                                        {(currentCompileOut?.judgeMessage || result?.judgeMessage) &&
+                                                         (currentCompileOut?.judgeMessage || result?.judgeMessage) !== (currentCompileOut?.compileOutput || result?.compileOutput) && (
+                                                            <div>
+                                                                <div className="text-[11px] font-semibold text-slate-400 mb-1">
+                                                                    Evaluation Details:
+                                                                </div>
+                                                                <pre className="rounded-xl bg-slate-950 p-3 text-slate-300 border border-slate-800 overflow-x-auto max-h-36 whitespace-pre-wrap">
+                                                                    {currentCompileOut?.judgeMessage || result?.judgeMessage}
+                                                                </pre>
+                                                            </div>
+                                                        )}
+
+                                                        {/* If fully clean */}
+                                                        {!(currentCompileOut?.compileOutput || result?.compileOutput) && !(currentCompileOut?.stdout || result?.stdout) && isAccepted && (
+                                                            <div className="flex items-center gap-2 text-emerald-400 py-1">
+                                                                <CheckCircle2 size={16} />
+                                                                <span>Code compiled cleanly and passed all test cases with 0 errors! (+{question.points} pts)</span>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </div>
                                             )}
-                                        </button>
+
+                                            {/* Action Footer */}
+                                            <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-slate-800 pt-5">
+                                                <div className="text-xs text-slate-400 flex items-center gap-2">
+                                                    <Sparkles size={14} className="text-violet-400 shrink-0" />
+                                                    <span>
+                                                        Click <strong className="text-slate-200">Compile Code</strong> to compile your fixes. Each fixed error grants <strong className="text-emerald-400">+1 point</strong>.
+                                                    </span>
+                                                </div>
+
+                                                <button
+                                                    type="button"
+                                                    disabled={isCompiling || isFinalSubmitted}
+                                                    onClick={() => handleCompile(question)}
+                                                    className={`inline-flex items-center justify-center gap-2 rounded-xl px-7 py-3 text-sm font-bold text-white transition disabled:cursor-not-allowed ${
+                                                        isFinalSubmitted
+                                                            ? "bg-slate-800 text-slate-500 cursor-not-allowed opacity-75"
+                                                            : isCompiling
+                                                                ? "bg-violet-700/80 cursor-wait shadow-lg shadow-violet-700/20"
+                                                                : isAccepted
+                                                                    ? "bg-emerald-600 hover:bg-emerald-500 shadow-lg shadow-emerald-600/20"
+                                                                    : "bg-violet-600 hover:bg-violet-500 active:scale-95 shadow-lg shadow-violet-600/25 hover:shadow-violet-600/40"
+                                                    }`}
+                                                >
+                                                    {isCompiling ? (
+                                                        <>
+                                                            <LoaderCircle size={16} className="animate-spin" />
+                                                            Compiling Code & Checking Errors...
+                                                        </>
+                                                    ) : isFinalSubmitted ? (
+                                                        <>
+                                                            <Lock size={16} />
+                                                            Round Finalized
+                                                        </>
+                                                    ) : isAccepted ? (
+                                                        <>
+                                                            <CheckCircle2 size={16} />
+                                                            Re-compile Code (All Bugs Solved)
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Play size={16} className="fill-current" />
+                                                            Compile Code
+                                                        </>
+                                                    )}
+                                                </button>
+                                            </div>
+                                        </article>
+                                    );
+                                })
+                            )}
+                        </div>
+
+                        {/* Language Selector Sidebar - Right Side Column */}
+                        <aside className="lg:col-span-4 xl:col-span-3 space-y-4">
+                            <div className="sticky top-6 rounded-3xl border border-slate-800 bg-slate-900/80 p-5 sm:p-6 backdrop-blur-md shadow-xl">
+                                <div className="flex items-center justify-between pb-3.5 border-b border-slate-800">
+                                    <div className="flex items-center gap-2">
+                                        <Terminal size={17} className="text-violet-400" />
+                                        <h3 className="text-sm font-bold uppercase tracking-wider text-white">
+                                            Language
+                                        </h3>
                                     </div>
-                                </article>
-                            );
-                        })}
+                                    <span className="text-[10px] font-semibold text-slate-400 bg-slate-800/90 px-2 py-0.5 rounded-full">
+                                        Select One
+                                    </span>
+                                </div>
+
+                                <p className="mt-3 text-xs text-slate-400 leading-relaxed">
+                                    Choose which language you want to debug. Only code for the chosen language is shown.
+                                </p>
+
+                                <div className="mt-4 space-y-2.5">
+                                    {ARENA_LANGUAGES.map((lang) => {
+                                        const count = questions.filter(
+                                            (q) => normalizeLang(q.language) === lang.id
+                                        ).length;
+                                        const solved = questions.filter(
+                                            (q) =>
+                                                normalizeLang(q.language) === lang.id &&
+                                                results[q._id]?.status === "accepted"
+                                        ).length;
+                                        const isSelected = selectedLanguage === lang.id;
+
+                                        return (
+                                            <button
+                                                key={lang.id}
+                                                type="button"
+                                                onClick={() => setSelectedLanguage(lang.id)}
+                                                className={`w-full text-left rounded-2xl p-3.5 transition-all flex items-center justify-between border ${
+                                                    isSelected
+                                                        ? "border-violet-500 bg-gradient-to-r from-violet-950/70 to-slate-900 text-white shadow-lg shadow-violet-500/10 ring-1 ring-violet-500/50"
+                                                        : "border-slate-800/90 bg-slate-950/60 text-slate-300 hover:border-slate-700 hover:bg-slate-900/90"
+                                                }`}
+                                            >
+                                                <div className="flex items-center gap-3 min-w-0">
+                                                    <span className="text-xl shrink-0" role="img" aria-label={lang.label}>
+                                                        {lang.icon}
+                                                    </span>
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-bold text-sm tracking-wide text-white truncate">
+                                                                {lang.label}
+                                                            </span>
+                                                            {isSelected && (
+                                                                <span className="h-2 w-2 rounded-full bg-violet-400 animate-pulse shrink-0" />
+                                                            )}
+                                                        </div>
+                                                        <span className="text-[11px] text-slate-400 block truncate">
+                                                            {lang.tag}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                <div className="shrink-0 text-right ml-2">
+                                                    {count > 0 ? (
+                                                        solved === count ? (
+                                                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                                                                <CheckCircle2 size={11} />
+                                                                Solved
+                                                            </span>
+                                                        ) : (
+                                                            <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                                                isSelected
+                                                                    ? "bg-violet-500/20 text-violet-300 border border-violet-500/40"
+                                                                    : "bg-slate-800 text-slate-300 border border-slate-700/60"
+                                                            }`}>
+                                                                {count} {count === 1 ? "challenge" : "challenges"}
+                                                            </span>
+                                                        )
+                                                    ) : (
+                                                        <span className="text-[10px] font-medium text-slate-500">
+                                                            0
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                <div className="mt-5 rounded-2xl bg-slate-950/80 border border-slate-800/80 p-3.5 text-[11px] text-slate-400 leading-relaxed">
+                                    <span className="font-semibold text-slate-300 block mb-1">
+                                        💡 Pro-Tip:
+                                    </span>
+                                    Switch languages anytime. Your code edits and progress are safely preserved for every challenge.
+                                </div>
+                            </div>
+                        </aside>
                     </div>
                 )}
             </main>

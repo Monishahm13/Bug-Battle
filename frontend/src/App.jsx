@@ -9,10 +9,12 @@ import DebugArena from "./pages/DebugArena";
 import Leaderboard from "./pages/Leaderboard";
 import SubmissionHistory from "./pages/SubmissionHistory";
 import ManageQuestions from "./pages/ManageQuestions";
-import { getAuthToken } from "./utils/auth";
+import { getAuthToken, getAuthUser } from "./utils/auth";
 
 function Home() {
   const token = getAuthToken();
+  const user = getAuthUser();
+  const isOrganizer = user?.role === "organizer";
 
   return (
     <div className="relative min-h-screen flex flex-col bg-slate-950 text-white selection:bg-blue-600 selection:text-white overflow-x-hidden">
@@ -34,13 +36,15 @@ function Home() {
           </a>
 
           <nav className="flex items-center gap-5 sm:gap-6 text-sm font-medium">
-            <a
-              href="/leaderboard"
-              className="inline-flex items-center gap-1.5 text-slate-300 hover:text-white transition"
-            >
-              <Trophy size={16} className="text-amber-400" />
-              Leaderboard
-            </a>
+            {isOrganizer && (
+              <a
+                href="/leaderboard"
+                className="inline-flex items-center gap-1.5 text-slate-300 hover:text-white transition"
+              >
+                <Trophy size={16} className="text-amber-400" />
+                Leaderboard
+              </a>
+            )}
 
             <a
               href={token ? "/dashboard" : "/login"}
@@ -84,13 +88,15 @@ function Home() {
               <ArrowRight size={18} />
             </a>
 
-            <a
-              href="/leaderboard"
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/80 px-7 py-3.5 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:bg-slate-900 active:scale-95"
-            >
-              <Trophy size={16} className="text-amber-400" />
-              View Leaderboard
-            </a>
+            {isOrganizer && (
+              <a
+                href="/leaderboard"
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/80 px-7 py-3.5 text-sm font-semibold text-slate-200 transition hover:border-slate-500 hover:bg-slate-900 active:scale-95"
+              >
+                <Trophy size={16} className="text-amber-400" />
+                View Leaderboard
+              </a>
+            )}
 
             {!token && (
               <a
@@ -176,12 +182,14 @@ function Home() {
                 </div>
               </div>
 
-              <a
-                href="/leaderboard"
-                className="mt-4 block w-full rounded-xl border border-blue-500/30 bg-blue-500/10 py-2.5 text-center text-xs font-bold text-blue-300 transition hover:bg-blue-500/20 hover:border-blue-500/50"
-              >
-                Explore Full Leaderboard →
-              </a>
+              {isOrganizer && (
+                <a
+                  href="/leaderboard"
+                  className="mt-4 block w-full rounded-xl border border-blue-500/30 bg-blue-500/10 py-2.5 text-center text-xs font-bold text-blue-300 transition hover:bg-blue-500/20 hover:border-blue-500/50"
+                >
+                  Explore Full Leaderboard →
+                </a>
+              )}
             </div>
           </div>
 

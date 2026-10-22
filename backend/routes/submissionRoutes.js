@@ -1,6 +1,7 @@
 const express = require("express");
 
 const protect = require("../middleware/authMiddleware");
+const allowRoles = require("../middleware/roleMiddleware");
 
 const {
     createSubmission,
@@ -30,7 +31,7 @@ router.get(
     getQuestionSubmissions
 );
 
-router.get("/leaderboard/:eventId", protect, getLeaderboard);
+router.get("/leaderboard/:eventId", protect, allowRoles("organizer"), getLeaderboard);
 
 router.get(
     "/:submissionId",

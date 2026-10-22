@@ -63,6 +63,26 @@ const submissionSchema = new mongoose.Schema(
         judgeMessage: {
             type: String,
             default: ""
+        },
+
+        fixedErrorsCount: {
+            type: Number,
+            default: 0
+        },
+
+        fixedBugIds: {
+            type: [Number],
+            default: []
+        },
+
+        compileOutput: {
+            type: String,
+            default: ""
+        },
+
+        stdout: {
+            type: String,
+            default: ""
         }
     },
     {

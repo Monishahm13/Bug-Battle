@@ -54,7 +54,7 @@ const submitToJudge = async ({
         },
         {
             headers,
-            timeout: 15000
+            timeout: 3500
         }
     );
 
@@ -65,7 +65,7 @@ const submitToJudge = async ({
     }
 
     // Poll until execution finishes or the time limit is reached.
-    const maxAttempts = 20;
+    const maxAttempts = 8;
     const pollInterval = 1000;
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -75,7 +75,7 @@ const submitToJudge = async ({
             `${baseURL}/submissions/${token}?base64_encoded=false`,
             {
                 headers,
-                timeout: 10000
+                timeout: 2500
             }
         );
 

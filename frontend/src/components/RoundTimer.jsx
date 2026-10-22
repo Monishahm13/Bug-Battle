@@ -709,13 +709,6 @@ export default function RoundTimer({
                             To ensure contest fairness, unauthorized browser sidebars, external windows, and AI assistants (including <strong>Microsoft Copilot</strong>) must be hidden during this round.
                         </p>
 
-                        <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-xs text-slate-400 text-left space-y-2">
-                            <p className="font-bold text-slate-200">Strict Proctoring Rules:</p>
-                            <p>• Microsoft Edge Copilot and sidebar tools are strictly blocked.</p>
-                            <p>• Leaving fullscreen, clicking external windows, or switching tabs will immediately terminate your session.</p>
-                            <p>• Any violation triggers instant automated evaluation and locks your submissions.</p>
-                        </div>
-
                         <div className="mt-6 flex flex-col sm:flex-row items-center gap-3">
                             <button
                                 type="button"
@@ -812,7 +805,7 @@ export default function RoundTimer({
                                     🚨 External Tool / Focus Violation — Test Terminated
                                 </h3>
                                 <p className="mt-2 text-sm text-slate-300 leading-relaxed">
-                                    An unauthorized window switch, Copilot assistant opening, or fullscreen exit was detected. In accordance with competition anti-cheat rules, your solutions have been automatically submitted and this session is permanently terminated.
+                                    An unauthorized window switch, Copilot assistant opening, or fullscreen exit was detected. Your solutions have been automatically submitted and this session has ended.
                                 </p>
 
                                 <div className="mt-5 rounded-2xl border border-red-500/20 bg-red-950/40 p-4 text-xs text-red-300 text-left space-y-1.5">

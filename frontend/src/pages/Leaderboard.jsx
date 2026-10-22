@@ -8,9 +8,10 @@ import {
     RefreshCw,
     LoaderCircle,
     AlertCircle,
-    Sparkles
+    Sparkles,
+    ShieldAlert
 } from "lucide-react";
-import { getAuthToken } from "../utils/auth";
+import { getAuthToken, getAuthUser } from "../utils/auth";
 import { API_BASE_URL } from "../config/api";
 
 const API = API_BASE_URL;
@@ -18,6 +19,7 @@ const API = API_BASE_URL;
 function Leaderboard() {
     const navigate = useNavigate();
 
+    const [isOrganizer, setIsOrganizer] = useState(() => getAuthUser()?.role === "organizer");
     const [leaderboard, setLeaderboard] = useState([]);
     const [eventName, setEventName] = useState("BUG BATTLE 2026");
     const [eventData, setEventData] = useState(null);
@@ -42,6 +44,18 @@ function Leaderboard() {
         setError("");
 
         try {
+            // Verify organizer role
+            const userRes = await axios.get(`${API}/auth/me`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const userData = userRes.data.user || userRes.data;
+            if (userData.role !== "organizer") {
+                setIsOrganizer(false);
+                setLoading(false);
+                return;
+            }
+            setIsOrganizer(true);
+
             // First get active event dynamically
             const eventRes = await axios.get(`${API}/events/active`, {
                 headers: { Authorization: `Bearer ${token}` }
@@ -100,6 +114,29 @@ function Leaderboard() {
     };
 
     const winner = leaderboard[0];
+
+    if (!loading && !isOrganizer) {
+        return (
+            <main className="min-h-screen bg-slate-950 px-5 py-16 text-slate-100 sm:px-8 flex items-center justify-center">
+                <div className="max-w-md w-full rounded-3xl border border-slate-800 bg-slate-900/80 p-8 text-center backdrop-blur-md shadow-2xl">
+                    <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-amber-500/30 bg-amber-500/10 text-amber-400">
+                        <ShieldAlert size={28} />
+                    </div>
+                    <h2 className="text-xl font-bold text-white">Organizer Only</h2>
+                    <p className="mt-2 text-sm text-slate-400">
+                        The tournament leaderboard is only visible to event organizers.
+                    </p>
+                    <button
+                        onClick={() => navigate("/dashboard")}
+                        className="mt-6 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white transition hover:bg-blue-500 shadow-lg shadow-blue-600/20"
+                    >
+                        <ArrowLeft size={16} />
+                        Back to Dashboard
+                    </button>
+                </div>
+            </main>
+        );
+    }
 
     return (
         <main className="min-h-screen bg-slate-950 px-5 py-10 text-slate-100 sm:px-8">
