@@ -23,7 +23,8 @@ import {
     FileSpreadsheet,
     FileText,
     Download,
-    CheckCircle2
+    CheckCircle2,
+    Trash2
 } from "lucide-react";
 import {
     exportParticipantsToExcel,
@@ -370,6 +371,32 @@ function Dashboard() {
             if (activeEvent?._id) fetchQualificationData(activeEvent._id);
         } catch (err) {
             setOrganizerMsg(err.response?.data?.message || `Failed to reset ${phase}`);
+        } finally {
+            setUpdatingEvent(false);
+        }
+    };
+
+    const handleClearParticipants = async () => {
+        if (!activeEvent) return;
+        const confirmMsg = "Are you sure you want to permanently remove ALL participants, teams, and submissions? This will reset the tournament back to 0 participants.";
+        if (!window.confirm(confirmMsg)) return;
+
+        setUpdatingEvent(true);
+        setOrganizerMsg("");
+
+        try {
+            const token = getAuthToken();
+            const res = await axios.post(
+                `${API}/events/${activeEvent._id}/clear-participants`,
+                {},
+                { headers: { Authorization: `Bearer ${token}` } }
+            );
+
+            setActiveEvent(res.data.event);
+            setOrganizerMsg(res.data.message || "All participants cleared successfully!");
+            if (activeEvent?._id) fetchQualificationData(activeEvent._id);
+        } catch (err) {
+            setOrganizerMsg(err.response?.data?.message || "Failed to clear participants");
         } finally {
             setUpdatingEvent(false);
         }
@@ -904,15 +931,27 @@ function Dashboard() {
                                             Starting a round unlocks challenges and triggers synchronized countdown timers across all participant machines.
                                         </p>
                                     </div>
-                                    <button
-                                        type="button"
-                                        disabled={updatingEvent}
-                                        onClick={() => handleResetRound("all")}
-                                        className="rounded-xl border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-300 px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5 self-start sm:self-auto"
-                                    >
-                                        <RotateCcw size={13} />
-                                        <span>Reset All Rounds</span>
-                                    </button>
+                                    <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+                                        <button
+                                            type="button"
+                                            disabled={updatingEvent}
+                                            onClick={handleClearParticipants}
+                                            className="rounded-xl border border-red-500/40 bg-red-500/15 hover:bg-red-500/25 text-red-300 px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5"
+                                            title="Permanently remove all participants, teams, and submissions"
+                                        >
+                                            <Trash2 size={13} />
+                                            <span>Remove All Participants</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={updatingEvent}
+                                            onClick={() => handleResetRound("all")}
+                                            className="rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 px-3.5 py-1.5 text-xs font-bold transition flex items-center gap-1.5"
+                                        >
+                                            <RotateCcw size={13} />
+                                            <span>Reset All Rounds</span>
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <div className="grid gap-4 sm:grid-cols-2">

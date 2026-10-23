@@ -582,6 +582,56 @@ const resetRound = async (req, res) => {
     }
 };
 
+const clearAllParticipants = async (req, res) => {
+    try {
+        const { id } = req.params;
+        let event = null;
+        if (id === "active" || !id.match(/^[0-9a-fA-F]{24}$/)) {
+            event = await Event.findOne({ status: "live" }) || await Event.findOne().sort({ createdAt: -1 });
+        } else {
+            event = await Event.findById(id);
+        }
+
+        if (!event) {
+            return res.status(404).json({ message: "Event not found" });
+        }
+
+        if (
+            event.organizer.toString() !== req.user._id.toString() &&
+            req.user.role !== "organizer"
+        ) {
+            return res.status(403).json({ message: "Only organizers can clear participants" });
+        }
+
+        // Delete all submissions for this event
+        await Submission.deleteMany({ event: event._id });
+
+        // Delete all teams for this event
+        await Team.deleteMany({ event: event._id });
+
+        // Delete all participant accounts
+        await User.deleteMany({ role: "participant" });
+
+        // Reset round timers and phase
+        event.phase = "not_started";
+        event.roundControl = {
+            bug_snap: { isStarted: false, startedAt: null, durationMinutes: 20, endsAt: null },
+            debug_arena: { isStarted: false, startedAt: null, durationMinutes: 30, endsAt: null }
+        };
+        await event.save();
+
+        const populatedEvent = await Event.findById(event._id).populate("organizer", "name email");
+
+        return res.status(200).json({
+            message: "All participants, teams, and submissions have been cleared successfully.",
+            event: populatedEvent
+        });
+    } catch (error) {
+        console.error("Clear participants error:", error);
+        return res.status(500).json({ message: "Server error while clearing participants" });
+    }
+};
+
 module.exports = {
     createEvent,
     getEvents,
@@ -591,5 +641,6 @@ module.exports = {
     deleteEvent,
     getEventQualification,
     startRound,
-    resetRound
+    resetRound,
+    clearAllParticipants
 };

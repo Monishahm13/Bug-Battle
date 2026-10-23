@@ -12,7 +12,8 @@ const {
     deleteEvent,
     getEventQualification,
     startRound,
-    resetRound
+    resetRound,
+    clearAllParticipants
 } = require("../controllers/eventController");
 
 const router = express.Router();
@@ -37,6 +38,13 @@ router.post(
     protect,
     allowRoles("organizer"),
     resetRound
+);
+
+router.post(
+    "/:id/clear-participants",
+    protect,
+    allowRoles("organizer"),
+    clearAllParticipants
 );
 
 router.post(
