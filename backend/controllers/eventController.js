@@ -240,15 +240,18 @@ const getEventQualification = async (req, res) => {
             .populate("captain", "name email")
             .populate("members", "name email");
 
-        const acceptedSubs = await Submission.find({
-            event: event._id,
-            status: "accepted"
-        }).populate("question", "phase points");
+        const allSubs = await Submission.find({
+            event: event._id
+        }).populate("question", "phase points").sort({ createdAt: -1 });
 
         const teamStats = teams.map((team) => {
-            const teamSubs = acceptedSubs.filter(
-                (s) => s.team.toString() === team._id.toString()
+            const teamSubs = allSubs.filter(
+                (s) => s.team?.toString() === team._id.toString() && s.status === "accepted"
             );
+            const teamAllSubs = allSubs.filter(
+                (s) => s.team?.toString() === team._id.toString()
+            );
+
             const solvedQIds = new Set();
             let phase1Score = 0;
             let phase2Score = 0;
@@ -269,6 +272,18 @@ const getEventQualification = async (req, res) => {
 
             const isQualified = phase1Score >= (event.qualifyingScore || 15);
 
+            // Bug Snap final submission timing
+            const bugSnapSubs = teamAllSubs.filter(s => s.question?.phase !== "debug_arena");
+            const bugSnapLastSubTime = bugSnapSubs.length > 0 ? bugSnapSubs[0].createdAt : null;
+            const bugSnapSubmittedAt = team.roundTimers?.bug_snap?.submittedAt || bugSnapLastSubTime || null;
+            const isBugSnapSubmitted = Boolean(team.roundTimers?.bug_snap?.isSubmitted || bugSnapSubmittedAt);
+
+            // Debug Arena final submission timing
+            const debugArenaSubs = teamAllSubs.filter(s => s.question?.phase === "debug_arena");
+            const debugArenaLastSubTime = debugArenaSubs.length > 0 ? debugArenaSubs[0].createdAt : null;
+            const debugArenaSubmittedAt = team.roundTimers?.debug_arena?.submittedAt || debugArenaLastSubTime || null;
+            const isDebugArenaSubmitted = Boolean(team.roundTimers?.debug_arena?.isSubmitted || debugArenaSubmittedAt);
+
             return {
                 teamId: team._id,
                 teamName: team.name,
@@ -277,9 +292,55 @@ const getEventQualification = async (req, res) => {
                 phase1Score,
                 phase2Score,
                 totalScore: phase1Score + phase2Score,
-                isQualified
+                isQualified,
+                bugSnapSubmittedAt,
+                debugArenaSubmittedAt,
+                isBugSnapSubmitted,
+                isDebugArenaSubmitted
             };
         });
+
+        // Sort helper: Decreasing order by points, then earlier submission timing
+        const sortTeams = (list, scoreKey, timeKey) => {
+            return list.slice().sort((a, b) => {
+                const sA = Number(a[scoreKey]) || 0;
+                const sB = Number(b[scoreKey]) || 0;
+                if (sB !== sA) return sB - sA;
+
+                const tA = a[timeKey] ? new Date(a[timeKey]).getTime() : null;
+                const tB = b[timeKey] ? new Date(b[timeKey]).getTime() : null;
+                if (tA && tB) return tA - tB;
+                if (tA && !tB) return -1;
+                if (!tA && tB) return 1;
+
+                return (a.teamName || "").localeCompare(b.teamName || "");
+            });
+        };
+
+        const bugSnapSorted = sortTeams(teamStats, "phase1Score", "bugSnapSubmittedAt");
+        const bugSnapParticipants = bugSnapSorted.map((t, idx) => ({
+            slNo: idx + 1,
+            teamId: t.teamId,
+            teamName: t.teamName,
+            captain: t.captain,
+            members: t.members,
+            totalPoints: t.phase1Score,
+            submittedAt: t.bugSnapSubmittedAt,
+            isSubmitted: t.isBugSnapSubmitted
+        }));
+
+        const debugArenaSorted = sortTeams(teamStats, "phase2Score", "debugArenaSubmittedAt");
+        const debugArenaParticipants = debugArenaSorted.map((t, idx) => ({
+            slNo: idx + 1,
+            teamId: t.teamId,
+            teamName: t.teamName,
+            captain: t.captain,
+            members: t.members,
+            totalPoints: t.phase2Score,
+            submittedAt: t.debugArenaSubmittedAt,
+            isSubmitted: t.isDebugArenaSubmitted,
+            isQualified: t.isQualified
+        }));
 
         let myTeamStat = null;
         if (req.user) {
@@ -300,7 +361,9 @@ const getEventQualification = async (req, res) => {
             status: event.status,
             qualifyingScore: event.qualifyingScore || 15,
             myTeam: myTeamStat,
-            teams: teamStats
+            teams: teamStats,
+            bugSnapParticipants,
+            debugArenaParticipants
         });
     } catch (error) {
         console.error("Get qualification error:", error);

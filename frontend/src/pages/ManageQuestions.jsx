@@ -11,7 +11,11 @@ import {
     LoaderCircle,
     Trash2,
     Sparkles,
-    ShieldAlert
+    ShieldAlert,
+    Edit3,
+    X,
+    Check,
+    Lock
 } from "lucide-react";
 import { getAuthToken } from "../utils/auth";
 import { API_BASE_URL } from "../config/api";
@@ -24,6 +28,7 @@ const initialForm = {
     description: "",
     language: "javascript",
     buggyCode: "",
+    correctedCode: "",
     expectedOutput: "",
     difficulty: "easy",
     explanation: "",
@@ -56,6 +61,81 @@ function ManageQuestions() {
     const [loadingQuestions, setLoadingQuestions] = useState(false);
     const [filterPhase, setFilterPhase] = useState("all");
     const [deleteStatus, setDeleteStatus] = useState({ id: null, message: "", type: "" });
+    const [editingQuestion, setEditingQuestion] = useState(null);
+    const [editForm, setEditForm] = useState(null);
+    const [editSaving, setEditSaving] = useState(false);
+    const [editMessage, setEditMessage] = useState("");
+    const [editMessageType, setEditMessageType] = useState("");
+
+    const openEditModal = (q) => {
+        setEditingQuestion(q);
+        setEditForm({
+            title: q.title || "",
+            description: q.description || "",
+            language: q.language || "javascript",
+            buggyCode: q.buggyCode || "",
+            correctedCode: q.correctedCode || "",
+            expectedOutput: q.expectedOutput || "",
+            difficulty: q.difficulty || "easy",
+            explanation: q.explanation || "",
+            phase: q.phase || "bug_snap",
+            errorCount: q.errorCount || 1,
+            isTieBreaker: Boolean(q.isTieBreaker)
+        });
+        setEditMessage("");
+        setEditMessageType("");
+    };
+
+    const closeEditModal = () => {
+        setEditingQuestion(null);
+        setEditForm(null);
+        setEditMessage("");
+        setEditMessageType("");
+    };
+
+    const handleEditFormChange = (e) => {
+        const { name, value, type, checked } = e.target;
+        setEditForm((prev) => ({
+            ...prev,
+            [name]: type === "checkbox" ? checked : value
+        }));
+    };
+
+    const handleSaveEdit = async (e) => {
+        e.preventDefault();
+        if (!editingQuestion || !editForm) return;
+
+        setEditSaving(true);
+        setEditMessage("");
+
+        try {
+            const token = getAuthToken();
+            const payload = {
+                ...editForm,
+                errorCount: Number(editForm.errorCount) || 1
+            };
+
+            const res = await axios.put(`${API}/questions/${editingQuestion._id}`, payload, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            setEditMessage("Question and Corrected Code updated successfully!");
+            setEditMessageType("success");
+
+            setExistingQuestions((prev) =>
+                prev.map((q) => (q._id === editingQuestion._id ? res.data.question : q))
+            );
+
+            setTimeout(() => {
+                closeEditModal();
+            }, 1000);
+        } catch (err) {
+            setEditMessage(err.response?.data?.message || "Failed to update question");
+            setEditMessageType("error");
+        } finally {
+            setEditSaving(false);
+        }
+    };
 
     const fetchQuestions = async (eventId) => {
         if (!eventId) return;
@@ -536,6 +616,35 @@ function ManageQuestions() {
                         />
                     </div>
 
+                    {/* Dedicated Corrected Code (Organizer Exact Solution) Block */}
+                    <div className="rounded-2xl border border-emerald-500/40 bg-emerald-950/20 p-5 space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                            <label htmlFor="correctedCode" className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                                <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
+                                Corrected Code (Exact Solution) <span className="text-red-400">*</span>
+                            </label>
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 px-3 py-1 text-[11px] font-semibold text-emerald-300 w-fit">
+                                <Lock size={12} /> Confidential • Strict Exact Match
+                            </span>
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed">
+                            Enter the <strong>exact corrected source code</strong> for this question. When participants submit their answers in <strong>Bug Snap (Round 1)</strong> or <strong>Debug Arena (Round 2)</strong>, the system will compare their submitted code against this block <strong>strictly character-by-character</strong>.
+                            <br />
+                            <span className="text-emerald-300 font-semibold">Strict Validation Rule:</span> Any difference (space, extra space, missing space, newline, indentation, punctuation mark, or any character) will be rejected with <strong>0 marks</strong>. Only a 100% exact match will award the assigned marks. This code is kept strictly confidential from participants.
+                        </p>
+                        <textarea
+                            id="correctedCode"
+                            name="correctedCode"
+                            value={form.correctedCode}
+                            onChange={handleChange}
+                            rows={form.phase === "debug_arena" ? 14 : 7}
+                            required
+                            spellCheck={false}
+                            placeholder="// Enter or paste the EXACT corrected code that participants must produce..."
+                            className={`${inputClass} font-mono leading-6 text-xs sm:text-sm border-emerald-500/40 focus:border-emerald-400 focus:ring-emerald-500/20 bg-slate-950`}
+                        />
+                    </div>
+
                     {/* Expected Output */}
                     <div>
                         <label htmlFor="expectedOutput" className={labelClass}>
@@ -691,8 +800,8 @@ function ManageQuestions() {
                                     key={q._id}
                                     className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/60 p-4 transition hover:border-slate-700"
                                 >
-                                    <div>
-                                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2 mb-1.5">
                                             <span className={`rounded-md px-2 py-0.5 text-[11px] font-bold uppercase ${
                                                 q.phase === "debug_arena"
                                                     ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
@@ -711,29 +820,219 @@ function ManageQuestions() {
                                                     ⚡ Tie-Breaker
                                                 </span>
                                             )}
+                                            {q.correctedCode ? (
+                                                <span className="rounded-md bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-semibold text-emerald-300 flex items-center gap-1">
+                                                    <CheckCircle2 size={11} /> Corrected Code Configured
+                                                </span>
+                                            ) : (
+                                                <span className="rounded-md bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[11px] font-semibold text-amber-300 flex items-center gap-1">
+                                                    <AlertCircle size={11} /> Needs Corrected Code
+                                                </span>
+                                            )}
                                         </div>
                                         <h4 className="font-bold text-white text-sm">{q.title}</h4>
                                         <p className="text-xs text-slate-400 line-clamp-1">{q.description}</p>
                                     </div>
 
-                                    <button
-                                        type="button"
-                                        disabled={deleteStatus.id === q._id}
-                                        onClick={() => handleDeleteQuestion(q._id)}
-                                        className="shrink-0 rounded-xl border border-red-500/30 bg-red-500/10 p-2.5 text-red-400 hover:bg-red-500/20 hover:border-red-500/60 transition disabled:opacity-50"
-                                        title="Delete Question"
-                                    >
-                                        {deleteStatus.id === q._id ? (
-                                            <LoaderCircle size={16} className="animate-spin" />
-                                        ) : (
-                                            <Trash2 size={16} />
-                                        )}
-                                    </button>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <button
+                                            type="button"
+                                            onClick={() => openEditModal(q)}
+                                            className="inline-flex items-center gap-1.5 rounded-xl border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-400 hover:bg-blue-500/20 hover:border-blue-500/50 transition"
+                                            title="View / Edit Question and Corrected Code"
+                                        >
+                                            <Edit3 size={14} />
+                                            <span>Edit / Solution</span>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={deleteStatus.id === q._id}
+                                            onClick={() => handleDeleteQuestion(q._id)}
+                                            className="rounded-xl border border-red-500/30 bg-red-500/10 p-2.5 text-red-400 hover:bg-red-500/20 hover:border-red-500/60 transition disabled:opacity-50"
+                                            title="Delete Question"
+                                        >
+                                            {deleteStatus.id === q._id ? (
+                                                <LoaderCircle size={16} className="animate-spin" />
+                                            ) : (
+                                                <Trash2 size={16} />
+                                            )}
+                                        </button>
+                                    </div>
                                 </div>
                             ))}
                         </div>
                     )}
                 </div>
+
+                {/* Edit Question & Corrected Code Modal */}
+                {editingQuestion && editForm && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
+                        <div className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl space-y-5">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                                <div className="flex items-center gap-2.5">
+                                    <div className="rounded-xl bg-blue-600/20 border border-blue-500/30 p-2 text-blue-400">
+                                        <Edit3 size={18} />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-lg font-bold text-white">Edit Challenge & Solution</h3>
+                                        <p className="text-xs text-slate-400">Update question details and exact corrected code</p>
+                                    </div>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={closeEditModal}
+                                    className="rounded-lg p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                                >
+                                    <X size={18} />
+                                </button>
+                            </div>
+
+                            <form onSubmit={handleSaveEdit} className="space-y-4">
+                                <div>
+                                    <label className={labelClass}>Question Title</label>
+                                    <input
+                                        name="title"
+                                        value={editForm.title}
+                                        onChange={handleEditFormChange}
+                                        required
+                                        className={inputClass}
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className={labelClass}>Description</label>
+                                    <textarea
+                                        name="description"
+                                        value={editForm.description}
+                                        onChange={handleEditFormChange}
+                                        rows={2}
+                                        required
+                                        className={inputClass}
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className={labelClass}>Difficulty & Points</label>
+                                        <select
+                                            name="difficulty"
+                                            value={editForm.difficulty}
+                                            onChange={handleEditFormChange}
+                                            className={inputClass}
+                                        >
+                                            <option value="easy">Easy — 5 pts</option>
+                                            <option value="medium">Medium — 10 pts</option>
+                                            <option value="hard">Hard — 15 pts</option>
+                                            <option value="extreme">Extreme — 20 pts</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className={labelClass}>Language</label>
+                                        <select
+                                            name="language"
+                                            value={editForm.language}
+                                            onChange={handleEditFormChange}
+                                            className={inputClass}
+                                        >
+                                            <option value="javascript">JavaScript</option>
+                                            <option value="python">Python</option>
+                                            <option value="java">Java</option>
+                                            <option value="cpp">C++</option>
+                                            <option value="c">C</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className={labelClass}>Buggy Code</label>
+                                    <textarea
+                                        name="buggyCode"
+                                        value={editForm.buggyCode}
+                                        onChange={handleEditFormChange}
+                                        rows={6}
+                                        required
+                                        spellCheck={false}
+                                        className={`${inputClass} font-mono text-xs`}
+                                    />
+                                </div>
+
+                                {/* Dedicated Corrected Code Block in Edit Modal */}
+                                <div className="rounded-2xl border border-emerald-500/40 bg-emerald-950/25 p-4 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <label htmlFor="edit_correctedCode" className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                                            <CheckCircle2 size={16} /> Corrected Code (Exact Solution) <span className="text-red-400">*</span>
+                                        </label>
+                                        <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">
+                                            🔒 Strict Character Match
+                                        </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-300">
+                                        Submissions in Bug Snap and Debug Arena must match this code character-by-character. Any difference yields 0 marks.
+                                    </p>
+                                    <textarea
+                                        id="edit_correctedCode"
+                                        name="correctedCode"
+                                        value={editForm.correctedCode}
+                                        onChange={handleEditFormChange}
+                                        rows={7}
+                                        required
+                                        spellCheck={false}
+                                        placeholder="// Paste exact corrected solution here..."
+                                        className={`${inputClass} font-mono text-xs border-emerald-500/40 focus:border-emerald-400 bg-slate-950`}
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className={labelClass}>Expected Output</label>
+                                    <textarea
+                                        name="expectedOutput"
+                                        value={editForm.expectedOutput}
+                                        onChange={handleEditFormChange}
+                                        rows={2}
+                                        required
+                                        spellCheck={false}
+                                        className={`${inputClass} font-mono text-xs`}
+                                    />
+                                </div>
+
+                                {editMessage && (
+                                    <div
+                                        className={`flex items-center gap-2 rounded-xl border p-3 text-xs ${
+                                            editMessageType === "success"
+                                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                                                : "border-red-500/30 bg-red-500/10 text-red-300"
+                                        }`}
+                                    >
+                                        {editMessageType === "success" ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+                                        <span>{editMessage}</span>
+                                    </div>
+                                )}
+
+                                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                                    <button
+                                        type="button"
+                                        onClick={closeEditModal}
+                                        className="rounded-xl border border-slate-700 px-4 py-2.5 text-xs font-semibold text-slate-300 hover:bg-slate-800 transition"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={editSaving}
+                                        className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-semibold text-white hover:bg-blue-500 transition disabled:opacity-50"
+                                    >
+                                        {editSaving ? (
+                                            <LoaderCircle size={15} className="animate-spin" />
+                                        ) : (
+                                            <Check size={15} />
+                                        )}
+                                        {editSaving ? "Saving..." : "Save Changes"}
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
             </div>
         </main>
     );

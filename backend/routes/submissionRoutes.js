@@ -5,6 +5,7 @@ const allowRoles = require("../middleware/roleMiddleware");
 
 const {
     createSubmission,
+    runCodeOnly,
     getMySubmissions,
     getQuestionSubmissions,
     getSubmissionDetails,
@@ -12,6 +13,12 @@ const {
 } = require("../controllers/submissionController");
 
 const router = express.Router();
+
+router.post(
+    "/run",
+    protect,
+    runCodeOnly
+);
 
 router.post(
     "/",

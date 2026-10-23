@@ -19,8 +19,17 @@ import {
     Play,
     RotateCcw,
     Clock3,
-    Lock
+    Lock,
+    FileSpreadsheet,
+    FileText,
+    Download,
+    CheckCircle2
 } from "lucide-react";
+import {
+    exportParticipantsToExcel,
+    exportParticipantsToPDF,
+    formatSubmissionTiming
+} from "../utils/exportUtils";
 import { getAuthToken, clearAuthSession } from "../utils/auth";
 import { API_BASE_URL } from "../config/api";
 
@@ -63,6 +72,7 @@ function Dashboard() {
     const [updatingEvent, setUpdatingEvent] = useState(false);
     const [qualifyingScoreInput, setQualifyingScoreInput] = useState(15);
     const [organizerMsg, setOrganizerMsg] = useState("");
+    const [participantTab, setParticipantTab] = useState("bug_snap"); // "bug_snap" | "debug_arena"
     const navigate = useNavigate();
 
     const handleCreateTeam = async (e) => {
@@ -1080,42 +1090,300 @@ function Dashboard() {
                                 </div>
                             </div>
 
-                            {/* Teams Qualification Status Table */}
-                            {qualificationData?.teams && qualificationData.teams.length > 0 && (
-                                <div className="mt-6 rounded-2xl border border-slate-800 bg-slate-900/80 overflow-hidden">
-                                    <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-                                        <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                                            Registered Teams & Phase 2 Qualification ({qualificationData.teams.length} Teams)
-                                        </span>
-                                        <span className="text-xs text-emerald-400 font-semibold">
-                                            {qualificationData.teams.filter(t => t.isQualified).length} Qualified
-                                        </span>
-                                    </div>
-                                    <div className="divide-y divide-slate-800 text-xs">
-                                        {qualificationData.teams.map((t) => (
-                                            <div key={t.teamId} className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                                <div>
-                                                    <p className="font-bold text-white text-sm">{t.teamName}</p>
-                                                    <p className="text-slate-400 mt-0.5">
-                                                        Captain: {t.captain?.name} ({t.captain?.email}) • {t.members?.length} members
-                                                    </p>
-                                                </div>
-                                                <div className="flex items-center gap-4">
-                                                    <span className="text-slate-300">
-                                                        Phase 1 Score: <strong className="text-white">{t.phase1Score} pts</strong>
+                            {/* Participant List & Final Submissions Section (Bug Snap & Debug Arena) */}
+                            {(() => {
+                                const rawTeams = qualificationData?.teams || [];
+                                if (rawTeams.length === 0) return null;
+
+                                const sortTeamsDesc = (list, scoreKey, timeKey) => {
+                                    return list.slice().sort((a, b) => {
+                                        const sA = Number(a[scoreKey]) || 0;
+                                        const sB = Number(b[scoreKey]) || 0;
+                                        if (sB !== sA) return sB - sA;
+
+                                        const tA = a[timeKey] ? new Date(a[timeKey]).getTime() : null;
+                                        const tB = b[timeKey] ? new Date(b[timeKey]).getTime() : null;
+                                        if (tA && tB) return tA - tB;
+                                        if (tA && !tB) return -1;
+                                        if (!tA && tB) return 1;
+
+                                        return (a.teamName || "").localeCompare(b.teamName || "");
+                                    });
+                                };
+
+                                const bugSnapList = (qualificationData?.bugSnapParticipants && qualificationData.bugSnapParticipants.length > 0)
+                                    ? qualificationData.bugSnapParticipants
+                                    : sortTeamsDesc(rawTeams, "phase1Score", "bugSnapSubmittedAt").map((t, idx) => ({
+                                        slNo: idx + 1,
+                                        teamId: t.teamId,
+                                        teamName: t.teamName,
+                                        totalPoints: t.phase1Score ?? 0,
+                                        submittedAt: t.bugSnapSubmittedAt,
+                                        captain: t.captain,
+                                        members: t.members
+                                    }));
+
+                                const debugArenaList = (qualificationData?.debugArenaParticipants && qualificationData.debugArenaParticipants.length > 0)
+                                    ? qualificationData.debugArenaParticipants
+                                    : sortTeamsDesc(rawTeams, "phase2Score", "debugArenaSubmittedAt").map((t, idx) => ({
+                                        slNo: idx + 1,
+                                        teamId: t.teamId,
+                                        teamName: t.teamName,
+                                        totalPoints: t.phase2Score ?? 0,
+                                        submittedAt: t.debugArenaSubmittedAt,
+                                        isQualified: t.isQualified,
+                                        captain: t.captain,
+                                        members: t.members
+                                    }));
+
+                                return (
+                                    <div className="mt-8 rounded-3xl border border-slate-800 bg-slate-900/90 shadow-2xl overflow-hidden backdrop-blur-md">
+                                        {/* Header with Title and Download Buttons */}
+                                        <div className="p-5 sm:p-6 border-b border-slate-800 bg-slate-950/60 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-1.5">
+                                                    <span className="rounded-md bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[11px] font-bold text-blue-400 uppercase tracking-wider">
+                                                        Participant Rankings
                                                     </span>
-                                                    <span className={`rounded-full px-3 py-1 font-bold ${t.isQualified
-                                                        ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
-                                                        : "bg-amber-500/10 border border-amber-500/30 text-amber-400"
-                                                        }`}>
-                                                        {t.isQualified ? "QUALIFIED FOR PHASE 2" : "PENDING QUALIFICATION"}
+                                                    <span className="rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] font-bold text-emerald-400">
+                                                        {rawTeams.filter(t => t.isQualified).length} Qualified for Phase 2
                                                     </span>
                                                 </div>
+                                                <h3 className="text-lg sm:text-xl font-extrabold text-white tracking-wide">
+                                                    Participate List & Final Submissions
+                                                </h3>
+                                                <p className="text-xs text-slate-400 mt-0.5">
+                                                    Decreasing order based on total points and timing of final submission.
+                                                </p>
                                             </div>
-                                        ))}
+
+                                            {/* Download Option Buttons */}
+                                            <div className="flex items-center flex-wrap gap-2.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => exportParticipantsToExcel({
+                                                        eventName: activeEvent?.name || "Bug_Battle_2026",
+                                                        bugSnapList,
+                                                        debugArenaList
+                                                    })}
+                                                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2.5 text-xs font-bold shadow-lg shadow-emerald-600/20 active:scale-95 transition"
+                                                    title="Download Excel spreadsheet (.xlsx)"
+                                                >
+                                                    <FileSpreadsheet size={15} />
+                                                    <span>Download Excel (.xlsx)</span>
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => exportParticipantsToPDF({
+                                                        eventName: activeEvent?.name || "Bug_Battle_2026",
+                                                        bugSnapList,
+                                                        debugArenaList
+                                                    })}
+                                                    className="inline-flex items-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white px-3.5 py-2.5 text-xs font-bold shadow-lg shadow-rose-600/20 active:scale-95 transition"
+                                                    title="Download PDF document (.pdf)"
+                                                >
+                                                    <FileText size={15} />
+                                                    <span>Download PDF (.pdf)</span>
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Phase Selector Tabs */}
+                                        <div className="flex items-center border-b border-slate-800 bg-slate-950/40 px-5 sm:px-6 pt-3 gap-2">
+                                            <button
+                                                type="button"
+                                                onClick={() => setParticipantTab("bug_snap")}
+                                                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-xl transition border-b-2 -mb-px ${
+                                                    participantTab === "bug_snap"
+                                                        ? "border-blue-500 text-blue-400 bg-slate-900/90 shadow-sm"
+                                                        : "border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40"
+                                                }`}
+                                            >
+                                                <Bug size={14} />
+                                                <span>Bug Snap (Phase 1)</span>
+                                                <span className="rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] font-mono text-blue-300">
+                                                    {bugSnapList.length}
+                                                </span>
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                onClick={() => setParticipantTab("debug_arena")}
+                                                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold rounded-t-xl transition border-b-2 -mb-px ${
+                                                    participantTab === "debug_arena"
+                                                        ? "border-violet-500 text-violet-400 bg-slate-900/90 shadow-sm"
+                                                        : "border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/40"
+                                                }`}
+                                            >
+                                                <Code2 size={14} />
+                                                <span>Debug Arena (Phase 2)</span>
+                                                <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] font-mono text-violet-300">
+                                                    {debugArenaList.length}
+                                                </span>
+                                            </button>
+                                        </div>
+
+                                        {/* Table Content */}
+                                        <div className="overflow-x-auto">
+                                            {participantTab === "bug_snap" ? (
+                                                <table className="w-full text-left text-xs border-collapse">
+                                                    <thead>
+                                                        <tr className="border-b border-slate-800 bg-slate-950/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold">
+                                                            <th className="py-3 px-4 w-20 text-center">Sl. No</th>
+                                                            <th className="py-3 px-4">Team Name</th>
+                                                            <th className="py-3 px-4 w-36 text-center">Total points</th>
+                                                            <th className="py-3 px-4 w-64">Timing of final submission</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-800/60 font-medium">
+                                                        {bugSnapList.map((t, idx) => {
+                                                            const isTop1 = idx === 0 && t.totalPoints > 0;
+                                                            const isTop2 = idx === 1 && t.totalPoints > 0;
+                                                            const isTop3 = idx === 2 && t.totalPoints > 0;
+
+                                                            return (
+                                                                <tr
+                                                                    key={t.teamId || idx}
+                                                                    className="hover:bg-slate-800/40 transition-colors"
+                                                                >
+                                                                    <td className="py-3.5 px-4 text-center">
+                                                                        <span
+                                                                            className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-black ${
+                                                                                isTop1
+                                                                                    ? "bg-amber-500/20 border border-amber-500/40 text-amber-300 shadow-sm"
+                                                                                    : isTop2
+                                                                                    ? "bg-slate-300/20 border border-slate-300/40 text-slate-200"
+                                                                                    : isTop3
+                                                                                    ? "bg-amber-700/20 border border-amber-700/40 text-amber-400"
+                                                                                    : "bg-slate-800/70 text-slate-400"
+                                                                            }`}
+                                                                        >
+                                                                            {t.slNo || idx + 1}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="py-3.5 px-4">
+                                                                        <div className="font-bold text-white text-sm">
+                                                                            {t.teamName}
+                                                                        </div>
+                                                                        {t.captain && (
+                                                                            <div className="text-[11px] text-slate-400 mt-0.5">
+                                                                                Captain: {t.captain.name || t.captain.email} {t.members?.length ? `• ${t.members.length} members` : ""}
+                                                                            </div>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="py-3.5 px-4 text-center">
+                                                                        <span className="inline-block rounded-xl bg-blue-500/10 border border-blue-500/20 px-3.5 py-1 font-mono font-extrabold text-blue-300 text-sm">
+                                                                            {t.totalPoints ?? 0}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="py-3.5 px-4">
+                                                                        {t.submittedAt ? (
+                                                                            <div className="flex items-center gap-1.5 text-slate-300 font-mono text-xs">
+                                                                                <Clock3 size={13} className="text-blue-400 shrink-0" />
+                                                                                <span>{formatSubmissionTiming(t.submittedAt)}</span>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span className="text-slate-500 font-mono text-[11px] italic">
+                                                                                — No submission
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            ) : (
+                                                <table className="w-full text-left text-xs border-collapse">
+                                                    <thead>
+                                                        <tr className="border-b border-slate-800 bg-slate-950/80 text-slate-400 text-[11px] uppercase tracking-wider font-semibold">
+                                                            <th className="py-3 px-4 w-20 text-center">Sl. No</th>
+                                                            <th className="py-3 px-4">Team Name</th>
+                                                            <th className="py-3 px-4 w-36 text-center">Total points</th>
+                                                            <th className="py-3 px-4 w-64">Timing of final submission</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className="divide-y divide-slate-800/60 font-medium">
+                                                        {debugArenaList.map((t, idx) => {
+                                                            const isTop1 = idx === 0 && t.totalPoints > 0;
+                                                            const isTop2 = idx === 1 && t.totalPoints > 0;
+                                                            const isTop3 = idx === 2 && t.totalPoints > 0;
+
+                                                            return (
+                                                                <tr
+                                                                    key={t.teamId || idx}
+                                                                    className="hover:bg-slate-800/40 transition-colors"
+                                                                >
+                                                                    <td className="py-3.5 px-4 text-center">
+                                                                        <span
+                                                                            className={`inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-black ${
+                                                                                isTop1
+                                                                                    ? "bg-amber-500/20 border border-amber-500/40 text-amber-300 shadow-sm"
+                                                                                    : isTop2
+                                                                                    ? "bg-slate-300/20 border border-slate-300/40 text-slate-200"
+                                                                                    : isTop3
+                                                                                    ? "bg-amber-700/20 border border-amber-700/40 text-amber-400"
+                                                                                    : "bg-slate-800/70 text-slate-400"
+                                                                            }`}
+                                                                        >
+                                                                            {t.slNo || idx + 1}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="py-3.5 px-4">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <span className="font-bold text-white text-sm">
+                                                                                {t.teamName}
+                                                                            </span>
+                                                                            {t.isQualified && (
+                                                                                <span className="rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-bold text-emerald-400">
+                                                                                    Phase 2 Qualified
+                                                                                </span>
+                                                                            )}
+                                                                        </div>
+                                                                        {t.captain && (
+                                                                            <div className="text-[11px] text-slate-400 mt-0.5">
+                                                                                Captain: {t.captain.name || t.captain.email} {t.members?.length ? `• ${t.members.length} members` : ""}
+                                                                            </div>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="py-3.5 px-4 text-center">
+                                                                        <span className="inline-block rounded-xl bg-violet-500/10 border border-violet-500/20 px-3.5 py-1 font-mono font-extrabold text-violet-300 text-sm">
+                                                                            {t.totalPoints ?? 0}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="py-3.5 px-4">
+                                                                        {t.submittedAt ? (
+                                                                            <div className="flex items-center gap-1.5 text-slate-300 font-mono text-xs">
+                                                                                <Clock3 size={13} className="text-violet-400 shrink-0" />
+                                                                                <span>{formatSubmissionTiming(t.submittedAt)}</span>
+                                                                            </div>
+                                                                        ) : (
+                                                                            <span className="text-slate-500 font-mono text-[11px] italic">
+                                                                                — No submission
+                                                                            </span>
+                                                                        )}
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </tbody>
+                                                </table>
+                                            )}
+                                        </div>
+
+                                        {/* Table Footer */}
+                                        <div className="p-3.5 bg-slate-950/70 border-t border-slate-800 text-[11px] text-slate-400 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                            <span>
+                                                * Ranked in decreasing order by <strong>Total points</strong>. Ties are broken by <strong>Timing of final submission</strong> (earlier submission ranks higher).
+                                            </span>
+                                            <span className="text-slate-500 font-mono">
+                                                {participantTab === "bug_snap" ? `Bug Snap: ${bugSnapList.length} teams` : `Debug Arena: ${debugArenaList.length} teams`}
+                                            </span>
+                                        </div>
                                     </div>
-                                </div>
-                            )}
+                                );
+                            })()}
                         </section>
                     )}
 

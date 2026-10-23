@@ -33,6 +33,11 @@ const questionSchema = new mongoose.Schema(
             required: true
         },
 
+        correctedCode: {
+            type: String,
+            default: ""
+        },
+
         expectedOutput: {
             type: String,
             required: true

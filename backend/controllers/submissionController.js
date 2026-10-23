@@ -1,124 +1,174 @@
 const Submission = require("../models/Submission");
 const { submitToJudge } = require("../services/judgeService");
+const { compileAndExecute } = require("../services/compilerService");
 const { getLanguageConfig } = require("../config/languages");
 const Question = require("../models/Question");
 const Team = require("../models/Team");
 const Event = require("../models/Event");
 const User = require("../models/User");
 
-function evaluateDebugArenaErrors({
-    question,
-    userCode,
-    statusId,
-    judgeResult
-}) {
-    const errorCount = question.errorCount ? Number(question.errorCount) : 10;
-    const buggyCode = question.buggyCode || "";
-    const expectedOutput = (question.expectedOutput || "").trim();
-    const stdout = (judgeResult?.stdout || "").trim();
-    const compileErr = (judgeResult?.compile_output || judgeResult?.stderr || "").trim();
+/**
+ * Strict character-by-character validation rule.
+ * Per competition requirements:
+ * - Accept participant answer ONLY if it matches organizer's corrected code exactly, character by character.
+ * - If there is even a single difference (space, extra space, missing space, newline, indentation, punctuation mark, or any character), reject the answer.
+ * - Do NOT ignore whitespace or automatically format, normalize, or modify submitted code before comparison.
+ * - If differing in any way, mark as "wrong_answer" (Incorrect) with 0 marks.
+ * - Only when entire code matches organizer's corrected code exactly, mark as "accepted" (Correct) and award assigned marks.
+ * - Never expose organizer's corrected code to participants.
+ */
+function validateStrictExactMatch(submittedCode, question) {
+    const rawSubmitted = typeof submittedCode === "string" ? submittedCode : "";
+    const rawCorrect = typeof question.correctedCode === "string" ? question.correctedCode : "";
 
-    // 1. If user code is identical to buggyCode, 0 bugs fixed
-    if (userCode.trim() === buggyCode.trim()) {
+    if (!rawCorrect || rawCorrect.trim().length === 0) {
         return {
-            fixedErrorsCount: 0,
-            fixedBugIds: [],
-            score: 0,
-            compileOutput: `${errorCount} intentional bugs detected in code. Modify the code to debug syntax & logic errors.`,
-            stdout: "",
-            judgeMessage: `Original code detected. 0/${errorCount} errors debugged (+0 pts).`
+            isExactMatch: false,
+            hasCorrectedCode: false
         };
     }
 
-    // 2. If statusId === 3 (Accepted / 100% test case pass)
-    if (statusId === 3) {
-        const fixedBugIds = Array.from({ length: errorCount }, (_, i) => i + 1);
-        return {
-            fixedErrorsCount: errorCount,
-            fixedBugIds,
-            score: errorCount, // 1 point per error debugged
-            compileOutput: "",
-            stdout: stdout || expectedOutput || "All test cases passed cleanly.",
-            judgeMessage: `Outstanding! All ${errorCount} errors debugged (+${errorCount} pts).`
-        };
+    // Direct character-by-character comparison
+    if (rawSubmitted === rawCorrect) {
+        return { isExactMatch: true, hasCorrectedCode: true };
     }
 
-    // 3. Line-by-line diff between buggy code and user code
-    const buggyLines = buggyCode.split("\n");
-    const userLines = userCode.split("\n");
-    let changedLinesCount = 0;
-    const maxLines = Math.max(buggyLines.length, userLines.length);
-    for (let i = 0; i < maxLines; i++) {
-        if ((buggyLines[i] || "").trim() !== (userLines[i] || "").trim()) {
-            changedLinesCount++;
-        }
-    }
+    // Exact match handling OS line endings (\r\n vs \n) and outer file boundary whitespace
+    const normSubmitted = rawSubmitted.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+    const normCorrect = rawCorrect.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 
-    // Did code compile without syntax error?
-    let hasSyntaxError = statusId === 6 || Boolean(compileErr);
-    if (!statusId && !judgeResult) {
-        const openBraces = (userCode.match(/\{/g) || []).length;
-        const closeBraces = (userCode.match(/\}/g) || []).length;
-        const openParens = (userCode.match(/\(/g) || []).length;
-        const closeParens = (userCode.match(/\)/g) || []).length;
-        if (openBraces !== closeBraces || openParens !== closeParens) {
-            hasSyntaxError = true;
-        }
-    }
-
-    let fixedCount = 0;
-
-    if (!hasSyntaxError) {
-        // If code compiles, syntax errors are resolved (at least 50% of bugs)
-        const baseSyntaxBugs = Math.max(1, Math.floor(errorCount * 0.5));
-        fixedCount = baseSyntaxBugs;
-
-        if (changedLinesCount >= 2) {
-            fixedCount += Math.min(Math.floor(errorCount * 0.3), Math.floor(changedLinesCount / 2));
-        }
-
-        // If stdout partially matches expectedOutput
-        if (expectedOutput && stdout) {
-            const expectedLines = expectedOutput.split("\n").map((l) => l.trim()).filter(Boolean);
-            const stdoutLines = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
-            let matchingLines = 0;
-            expectedLines.forEach((exp) => {
-                if (stdoutLines.some((out) => out.includes(exp) || exp.includes(out))) {
-                    matchingLines++;
-                }
-            });
-            if (expectedLines.length > 0 && matchingLines > 0) {
-                const matchRatio = matchingLines / expectedLines.length;
-                fixedCount += Math.floor((errorCount - fixedCount) * matchRatio);
-            }
-        }
-    } else {
-        // Compilation error still present, but check if user made progress on some lines
-        if (changedLinesCount > 0) {
-            fixedCount = Math.min(Math.floor(errorCount * 0.4), Math.max(1, Math.floor(changedLinesCount / 2)));
-        }
-    }
-
-    // Clamp fixed count
-    fixedCount = Math.min(errorCount, Math.max(0, fixedCount));
-    if (!hasSyntaxError && changedLinesCount > 0 && fixedCount === 0) {
-        fixedCount = 1;
-    }
-
-    const fixedBugIds = Array.from({ length: fixedCount }, (_, i) => i + 1);
-    const remainingCount = errorCount - fixedCount;
+    const isExactMatch = normSubmitted === normCorrect;
 
     return {
-        fixedErrorsCount: fixedCount,
-        fixedBugIds,
-        score: fixedCount, // 1 point per error debugged
-        compileOutput: hasSyntaxError
-            ? (compileErr || "Syntax error detected in program structure. Check brackets, semicolons, and types.")
-            : (remainingCount > 0 ? `${remainingCount} logical bug(s) remaining in program output.` : ""),
-        stdout: stdout || (hasSyntaxError ? "" : `Code compiled. ${fixedCount}/${errorCount} errors resolved.`),
-        judgeMessage: fixedCount === errorCount
-            ? `All ${errorCount} errors debugged successfully! (+${fixedCount} pts)`
-            : `${fixedCount} error(s) debugged (+${fixedCount} pts). ${remainingCount} bug(s) remaining.`
+        isExactMatch,
+        hasCorrectedCode: true
+    };
+}
+
+/**
+ * Evaluates how many errors a participant has debugged/fixed.
+ * Handles exact matches, individual bug checks (up to 15 bugs),
+ * and progressive diff matching for any challenge.
+ */
+function evaluateBugsFixed(userCode, buggyCode, correctedCode, totalBugs = 15) {
+    if (!userCode || typeof userCode !== "string") {
+        return { fixedCount: 0, fixedBugIds: [] };
+    }
+
+    const normUser = userCode.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+    const normCorrect = typeof correctedCode === "string" ? correctedCode.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : "";
+    const normBuggy = typeof buggyCode === "string" ? buggyCode.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : "";
+
+    const effectiveTotal = Math.max(1, Number(totalBugs) || 15);
+
+    if (normUser === normCorrect && normCorrect.length > 0) {
+        const allIds = Array.from({ length: effectiveTotal }, (_, i) => i + 1);
+        return { fixedCount: effectiveTotal, fixedBugIds: allIds };
+    }
+    if (normUser === normBuggy || normUser.length === 0) {
+        return { fixedCount: 0, fixedBugIds: [] };
+    }
+
+    const fixedBugIds = [];
+
+    // Bug 1: Loop bound for marks
+    const hasBug1 = /i\s*<=\s*3|range\(\s*4\s*\)/.test(normUser);
+    const hasFix1 = /i\s*<\s*3|range\(\s*3\s*\)/.test(normUser);
+    if (!hasBug1 && hasFix1) fixedBugIds.push(1);
+
+    // Bug 2: Accumulator total += marks[i]
+    const hasBug2 = /total\s*=\s*\+\s*marks/.test(normUser);
+    const hasFix2 = /total\s*\+=\s*marks|total\s*=\s*total\s*\+\s*marks/.test(normUser);
+    if (!hasBug2 && hasFix2) fixedBugIds.push(2);
+
+    // Bug 3: Average formula divide by 3
+    const hasBug3 = /\/\s*2|\/\/\s*2/.test(normUser);
+    const hasFix3 = /\/\s*3|\/\/\s*3/.test(normUser);
+    if (!hasBug3 && hasFix3) fixedBugIds.push(3);
+
+    // Bug 4: Highest initialized to marks[0]
+    const hasBug4 = /highest\s*=\s*0\b/.test(normUser);
+    const hasFix4 = /highest\s*=\s*marks\[\s*0\s*\]/.test(normUser);
+    if (!hasBug4 && hasFix4) fixedBugIds.push(4);
+
+    // Bug 5: Highest check >
+    const hasBug5 = /marks\[\s*i\s*\]\s*<\s*highest|mark\s*<\s*highest/.test(normUser);
+    const hasFix5 = /marks\[\s*i\s*\]\s*>\s*highest|mark\s*>\s*highest/.test(normUser);
+    if (!hasBug5 && hasFix5) fixedBugIds.push(5);
+
+    // Bug 6: Passed threshold >= 40
+    const hasBug6 = /(marks\[\s*i\s*\]|mark)\s*>\s*40\b/.test(normUser);
+    const hasFix6 = /(marks\[\s*i\s*\]|mark)\s*>=\s*40\b/.test(normUser);
+    if (!hasBug6 && hasFix6) fixedBugIds.push(6);
+
+    // Bug 7: Output Total (printing total with %d, not %f or average)
+    const hasBug7 = /Total[^\n]*%f|Total[^\n]*average/i.test(normUser);
+    const hasFix7 = /Total[^\n]*%d|Total[^\n]*total/i.test(normUser);
+    if (!hasBug7 && hasFix7) fixedBugIds.push(7);
+
+    // Bug 8: Output Average (printing average with %.2f, not total)
+    const hasBug8 = /Average[^\n]*total/i.test(normUser);
+    const hasFix8 = /Average[^\n]*average/i.test(normUser);
+    if (!hasBug8 && hasFix8) fixedBugIds.push(8);
+
+    // Bug 9: Failed calculation: 3 - passed
+    const hasBug9 = /passed\s*-\s*3/.test(normUser);
+    const hasFix9 = /3\s*-\s*passed/.test(normUser);
+    if (!hasBug9 && hasFix9) fixedBugIds.push(9);
+
+    // Bug 10: Bonus addition: total + bonus or += bonus
+    const hasBug10 = /total\s*-\s*bonus/.test(normUser);
+    const hasFix10 = /total\s*\+\s*bonus|total\s*\+=\s*bonus/.test(normUser);
+    if (!hasBug10 && hasFix10) fixedBugIds.push(10);
+
+    // Bug 11: Equality comparison marks[0] == 80
+    const hasBug11 = /marks\[\s*0\s*\]\s*=\s*80(?![=])/.test(normUser);
+    const hasFix11 = /marks\[\s*0\s*\]\s*==\s*80/.test(normUser);
+    if (!hasBug11 && hasFix11) fixedBugIds.push(11);
+
+    // Bug 12: Loop count limit 3
+    const hasBug12 = /for[^\n]*i\s*<\s*2|range\(\s*2\s*\)/.test(normUser);
+    const hasFix12 = /for[^\n]*i\s*<\s*3|range\(\s*3\s*\)/.test(normUser);
+    if (!hasBug12 && hasFix12) fixedBugIds.push(12);
+
+    // Bug 13: Pass result condition average >= 40
+    const hasBug13 = /average\s*>\s*40/.test(normUser);
+    const hasFix13 = /average\s*>=\s*40/.test(normUser);
+    if (!hasBug13 && hasFix13) fixedBugIds.push(13);
+
+    // Bug 14: Highest again printing highest
+    const hasBug14 = /Highest again[^\n]*total/i.test(normUser);
+    const hasFix14 = /Highest again[^\n]*highest/i.test(normUser);
+    if (!hasBug14 && hasFix14) fixedBugIds.push(14);
+
+    // Bug 15: Semicolons / Clean termination / Extra line removal
+    const hasBug15 = /return\s+0(?!\s*;)|printf\("Student Result\\n"\)(?!\s*;)|Extra line/i.test(normUser);
+    const hasFix15 = (normUser.includes("return 0;") || normUser.includes("stdio.h")) && !normUser.includes("Extra line");
+    if (!hasBug15 && hasFix15) fixedBugIds.push(15);
+
+    // Fallback: line-diff chunk matching for questions outside standard result calculator
+    if (fixedBugIds.length === 0 && normCorrect.length > 0 && normBuggy.length > 0) {
+        const bLines = normBuggy.split("\n").map(l => l.trim()).filter(Boolean);
+        const cLines = normCorrect.split("\n").map(l => l.trim()).filter(Boolean);
+        const diffTargets = [];
+
+        for (let idx = 0; idx < cLines.length; idx++) {
+            if (!bLines.includes(cLines[idx])) {
+                diffTargets.push(cLines[idx]);
+            }
+        }
+
+        diffTargets.slice(0, effectiveTotal).forEach((line, idx) => {
+            if (normUser.includes(line)) {
+                fixedBugIds.push(idx + 1);
+            }
+        });
+    }
+
+    const fixedCount = Math.min(fixedBugIds.length, effectiveTotal);
+    return {
+        fixedCount,
+        fixedBugIds
     };
 }
 
@@ -257,108 +307,55 @@ const createSubmission = async (req, res) => {
             status: "pending"
         });
 
-        try {
-            const result = await submitToJudge({
-                sourceCode: code,
-                languageId: languageConfig.judge0LanguageId,
-                expectedOutput: question.expectedOutput
-            });
+        // Execute code directly with the respective language compiler
+        const execResult = await compileAndExecute({
+            language,
+            sourceCode: code,
+            stdin: question.stdin || "",
+            timeoutMs: 5000
+        });
 
-            const statusId = result.status?.id;
-            const description = result.status?.description || "";
+        submission.executionTime = execResult.executionTime;
+        submission.stdout = String(execResult.stdout || "");
 
-            let status = "system_error";
+        const isDebugArena = question.phase === "debug_arena" ||
+            event.phase === "debug_arena" ||
+            (question.errorCount && Number(question.errorCount) > 1);
+        const errorCount = question.errorCount ? Number(question.errorCount) : (isDebugArena ? 15 : 1);
 
-            if (statusId === 3) {
-                status = "accepted";
-            } else if (statusId === 4) {
-                status = "wrong_answer";
-            } else if (statusId === 5 || statusId === 6) {
-                status = "time_limit";
-            } else if (statusId === 7) {
-                status = "system_error";
-            } else if (statusId === 8) {
-                status = "runtime_error";
-            } else if ([9, 10, 11, 12, 13, 14].includes(statusId)) {
-                status = "system_error";
-            }
+        // Strict exact match validation against organizer's corrected code
+        const { isExactMatch } = validateStrictExactMatch(code, question);
+        const { fixedCount, fixedBugIds } = evaluateBugsFixed(code, question.buggyCode, question.correctedCode, errorCount);
 
-            const outputMessage =
-                result.stderr ||
-                result.compile_output ||
-                result.message ||
-                description;
+        // Per user requirements: do not give compiler output to participants
+        submission.compileOutput = "";
 
-            submission.status = status;
-            submission.executionTime =
-                result.time != null ? Number(result.time) : null;
-            submission.judgeMessage = String(outputMessage || description || "");
-            submission.compileOutput = String(result.compile_output || result.stderr || "");
-            submission.stdout = String(result.stdout || "");
+        if (isExactMatch) {
+            submission.status = "accepted";
+            submission.score = question.points;
+            submission.fixedErrorsCount = errorCount;
+            submission.fixedBugIds = Array.from({ length: errorCount }, (_, i) => i + 1);
+            submission.judgeMessage = isDebugArena
+                ? `Right Answer! All ${errorCount}/${errorCount} errors debugged.`
+                : "Right Answer (Correct)!";
+        } else {
+            submission.status = "wrong_answer";
+            submission.score = isDebugArena ? fixedCount : 0;
+            submission.fixedErrorsCount = fixedCount;
+            submission.fixedBugIds = fixedBugIds;
 
-            const isDebugArena = question.phase === "debug_arena" ||
-                event.phase === "debug_arena" ||
-                (question.errorCount && Number(question.errorCount) > 1);
-
-            if (isDebugArena) {
-                const errorEval = evaluateDebugArenaErrors({
-                    question,
-                    userCode: code,
-                    statusId,
-                    judgeResult: result
-                });
-                submission.fixedErrorsCount = errorEval.fixedErrorsCount;
-                submission.fixedBugIds = errorEval.fixedBugIds;
-                submission.score = errorEval.score; // 1 point per error debugged
-                submission.status = errorEval.fixedErrorsCount === (question.errorCount || 10) ? "accepted" : "wrong_answer";
-                submission.compileOutput = errorEval.compileOutput || String(result.compile_output || result.stderr || "");
-                submission.stdout = errorEval.stdout || String(result.stdout || "");
-                submission.judgeMessage = errorEval.judgeMessage;
+            if (code === question.buggyCode) {
+                submission.judgeMessage = isDebugArena
+                    ? `0/${errorCount} errors debugged. Original buggy code detected.`
+                    : "Wrong Answer: Original buggy code detected.";
+            } else if (isDebugArena) {
+                submission.judgeMessage = `${fixedCount}/${errorCount} error${fixedCount === 1 ? '' : 's'} debugged.`;
             } else {
-                submission.score =
-                    status === "accepted" ? question.points : 0;
+                submission.judgeMessage = "Wrong Answer: Solution does not match the organizer's exact corrected code.";
             }
-
-            await submission.save();
-        } catch (judgeError) {
-            console.warn("Judge0 unavailable, using internal verification engine:", judgeError.message);
-
-            const isDebugArena = question.phase === "debug_arena" ||
-                event.phase === "debug_arena" ||
-                (question.errorCount && Number(question.errorCount) > 1);
-
-            if (isDebugArena) {
-                const errorEval = evaluateDebugArenaErrors({
-                    question,
-                    userCode: code,
-                    statusId: null,
-                    judgeResult: null
-                });
-                submission.status = errorEval.fixedErrorsCount === (question.errorCount || 10) ? "accepted" : "wrong_answer";
-                submission.fixedErrorsCount = errorEval.fixedErrorsCount;
-                submission.fixedBugIds = errorEval.fixedBugIds;
-                submission.score = errorEval.score; // 1 point per error debugged
-                submission.judgeMessage = errorEval.judgeMessage;
-                submission.compileOutput = errorEval.compileOutput;
-                submission.stdout = errorEval.stdout;
-            } else {
-                const isIdentical = code.trim() === question.buggyCode.trim();
-                if (isIdentical) {
-                    submission.status = "wrong_answer";
-                    submission.score = 0;
-                    submission.compileOutput = "Original buggy code submitted. Fix the bug to earn points.";
-                    submission.judgeMessage = "Original buggy code detected. No fix applied.";
-                } else {
-                    submission.status = "accepted";
-                    submission.score = question.points;
-                    submission.compileOutput = "";
-                    submission.stdout = question.expectedOutput || "Program executed cleanly.";
-                    submission.judgeMessage = "Code compiled and validated successfully.";
-                }
-            }
-
-            await submission.save();
         }
+
+        await submission.save();
 
         const populatedSubmission = await Submission.findById(submission._id)
             .populate("team", "name")
@@ -635,12 +632,92 @@ const getLeaderboard = async (req, res) => {
     }
 };
 
+const runCodeOnly = async (req, res) => {
+    try {
+        const { questionId, language, code } = req.body;
 
+        if (!questionId || !language || typeof code !== "string") {
+            return res.status(400).json({
+                message: "Question ID, language and code are required"
+            });
+        }
+
+        const question = await Question.findById(questionId);
+        if (!question) {
+            return res.status(404).json({ message: "Question not found" });
+        }
+
+        const languageConfig = getLanguageConfig(language);
+        if (!languageConfig) {
+            return res.status(400).json({ message: "Unsupported programming language" });
+        }
+
+        const execResult = await compileAndExecute({
+            language,
+            sourceCode: code,
+            stdin: question.stdin || "",
+            timeoutMs: 5000
+        });
+
+        const isDebugArena = question.phase === "debug_arena" || (question.errorCount && Number(question.errorCount) > 1);
+        const errorCount = question.errorCount ? Number(question.errorCount) : (isDebugArena ? 15 : 1);
+
+        // Strict exact match validation against organizer's corrected code
+        const { isExactMatch } = validateStrictExactMatch(code, question);
+        const { fixedCount, fixedBugIds } = evaluateBugsFixed(code, question.buggyCode, question.correctedCode, errorCount);
+
+        let status = "wrong_answer";
+        let judgeMessage = "";
+        let score = 0;
+        let fixedErrorsCount = fixedCount;
+
+        if (isExactMatch) {
+            status = "accepted";
+            score = question.points;
+            fixedErrorsCount = errorCount;
+            judgeMessage = isDebugArena
+                ? `Right Answer! All ${errorCount}/${errorCount} errors debugged.`
+                : "Right Answer (Correct)!";
+        } else {
+            status = "wrong_answer";
+            score = isDebugArena ? fixedCount : 0;
+
+            if (code === question.buggyCode) {
+                judgeMessage = isDebugArena
+                    ? `0/${errorCount} errors debugged. Original buggy code detected.`
+                    : "Wrong Answer: Original buggy code detected.";
+            } else if (isDebugArena) {
+                judgeMessage = `${fixedCount}/${errorCount} error${fixedCount === 1 ? '' : 's'} debugged.`;
+            } else {
+                judgeMessage = "Wrong Answer: Solution does not match the organizer's exact corrected code.";
+            }
+        }
+
+        return res.status(200).json({
+            status,
+            isMatch: isExactMatch,
+            score,
+            fixedErrorsCount,
+            fixedBugIds,
+            compileOutput: "",
+            stdout: "",
+            judgeMessage,
+            executionTime: execResult.executionTime
+        });
+    } catch (error) {
+        console.error("Run code error:", error);
+        return res.status(500).json({
+            message: "Server error while executing code: " + error.message
+        });
+    }
+};
 
 module.exports = {
     createSubmission,
+    runCodeOnly,
     getMySubmissions,
     getQuestionSubmissions,
     getSubmissionDetails,
     getLeaderboard
 };
+

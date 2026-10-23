@@ -16,6 +16,7 @@ const createQuestion = async (req, res) => {
             description,
             language,
             buggyCode,
+            correctedCode,
             expectedOutput,
             difficulty,
             explanation,
@@ -67,6 +68,7 @@ const createQuestion = async (req, res) => {
             description: description.trim(),
             language,
             buggyCode,
+            correctedCode: typeof correctedCode === "string" ? correctedCode : "",
             expectedOutput,
             difficulty,
             points: difficultyPoints[difficulty],
@@ -139,7 +141,8 @@ const getQuestionsByEvent = async (req, res) => {
 
         let queryBuilder = Question.find(query).sort({ isTieBreaker: 1, createdAt: 1 });
         if (!isOrganizer) {
-            queryBuilder = queryBuilder.select("-expectedOutput -explanation");
+            // Strict security: Never expose correctedCode, expectedOutput, or explanation to participants
+            queryBuilder = queryBuilder.select("-expectedOutput -explanation -correctedCode");
         }
 
         const questions = await queryBuilder;
@@ -159,17 +162,25 @@ const getQuestionsByEvent = async (req, res) => {
 
 const getQuestionById = async (req, res) => {
     try {
-        const question = await Question.findOne({
-            _id: req.params.id,
-            active: true
-        })
-            .select("-expectedOutput -explanation")
-            .populate("event", "name status phase");
+        const question = await Question.findById(req.params.id)
+            .populate("event", "name status phase organizer");
 
         if (!question) {
             return res.status(404).json({
                 message: "Question not found"
             });
+        }
+
+        const isOrganizer = req.user && (
+            req.user.role === "organizer" ||
+            (question.event && question.event.organizer && question.event.organizer.toString() === req.user._id.toString())
+        );
+
+        // Strict security: Strip confidential fields if participant
+        if (!isOrganizer) {
+            question.expectedOutput = undefined;
+            question.explanation = undefined;
+            question.correctedCode = undefined;
         }
 
         return res.status(200).json({
@@ -208,9 +219,14 @@ const updateQuestion = async (req, res) => {
             description,
             language,
             buggyCode,
+            correctedCode,
             expectedOutput,
             difficulty,
             explanation,
+            phase,
+            errorCount,
+            errorTypes,
+            isTieBreaker,
             active
         } = req.body;
 
@@ -230,6 +246,10 @@ const updateQuestion = async (req, res) => {
             question.buggyCode = buggyCode;
         }
 
+        if (correctedCode !== undefined) {
+            question.correctedCode = typeof correctedCode === "string" ? correctedCode : "";
+        }
+
         if (expectedOutput !== undefined) {
             question.expectedOutput = expectedOutput;
         }
@@ -247,6 +267,22 @@ const updateQuestion = async (req, res) => {
 
         if (explanation !== undefined) {
             question.explanation = explanation;
+        }
+
+        if (phase !== undefined) {
+            question.phase = phase;
+        }
+
+        if (errorCount !== undefined) {
+            question.errorCount = Number(errorCount);
+        }
+
+        if (errorTypes !== undefined && Array.isArray(errorTypes)) {
+            question.errorTypes = errorTypes;
+        }
+
+        if (isTieBreaker !== undefined) {
+            question.isTieBreaker = Boolean(isTieBreaker);
         }
 
         if (active !== undefined) {

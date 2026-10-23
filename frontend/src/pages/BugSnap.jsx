@@ -10,7 +10,11 @@ import {
     XCircle,
     Clock3,
     Lock,
-    ShieldCheck
+    ShieldCheck,
+    Terminal,
+    Sparkles,
+    AlertTriangle,
+    Cpu
 } from "lucide-react";
 import RoundTimer from "../components/RoundTimer";
 import ProctoredCodeViewer from "../components/ProctoredCodeViewer";
@@ -28,6 +32,7 @@ function BugSnap() {
     const [codes, setCodes] = useState({});
     const [loading, setLoading] = useState(true);
     const [submittingId, setSubmittingId] = useState(null);
+    const [testingId, setTestingId] = useState(null);
     const [results, setResults] = useState({});
     const [error, setError] = useState("");
     const [submissionHistory, setSubmissionHistory] = useState([]);
@@ -176,6 +181,8 @@ function BugSnap() {
                         score: s.score,
                         executionTime: s.executionTime,
                         message: s.judgeMessage || "Accepted",
+                        compileOutput: s.compileOutput || "",
+                        stdout: s.stdout || "",
                         submission: s
                     };
                 }
@@ -189,6 +196,75 @@ function BugSnap() {
     useEffect(() => {
         fetchSubmissionHistory();
     }, [fetchSubmissionHistory]);
+
+    // Test run code through the respective compiler without saving final submission
+    const handleRunTest = async (question) => {
+        if (isFinalSubmitted) {
+            alert("This round has concluded and testing is locked.");
+            return;
+        }
+
+        const token = getAuthToken();
+        if (!token) {
+            navigate("/login");
+            return;
+        }
+
+        const code = codes[question._id] || "";
+        if (!code.trim()) {
+            setResults((previous) => ({
+                ...previous,
+                [question._id]: {
+                    status: "error",
+                    message: "Please enter your code before running test.",
+                },
+            }));
+            return;
+        }
+
+        setTestingId(question._id);
+
+        try {
+            const response = await axios.post(
+                `${API}/submissions/run`,
+                {
+                    questionId: question._id,
+                    language: question.language,
+                    code,
+                },
+                {
+                    headers: { Authorization: `Bearer ${token}` }
+                }
+            );
+
+            const data = response.data;
+            setResults((previous) => ({
+                ...previous,
+                [question._id]: {
+                    status: data.status,
+                    score: data.isMatch ? question.points : 0,
+                    executionTime: data.executionTime,
+                    message: data.judgeMessage,
+                    compileOutput: data.compileOutput || "",
+                    stdout: data.stdout || "",
+                    isTestRun: true
+                }
+            }));
+        } catch (err) {
+            setResults((previous) => ({
+                ...previous,
+                [question._id]: {
+                    status: "error",
+                    message: err.response?.data?.message || "Compiler test failed. Please try again.",
+                    compileOutput: err.response?.data?.compileOutput || "",
+                    stdout: "",
+                    isTestRun: true
+                }
+            }));
+        } finally {
+            setTestingId(null);
+        }
+    };
 
     // Manual single question submit
     const handleSubmit = async (question) => {
@@ -218,10 +294,6 @@ function BugSnap() {
         }
 
         setSubmittingId(question._id);
-        setResults((previous) => ({
-            ...previous,
-            [question._id]: null,
-        }));
 
         try {
             const response = await axios.post(
@@ -254,6 +326,9 @@ function BugSnap() {
                         submission.judgeMessage ||
                         response.data.message ||
                         "Submission processed.",
+                    compileOutput: submission.compileOutput || "",
+                    stdout: submission.stdout || "",
+                    isTestRun: false
                 },
             }));
         } catch (err) {
@@ -400,12 +475,34 @@ function BugSnap() {
         window.location.reload();
     };
 
+    const getCompilerBadge = (lang) => {
+        const l = (lang || "").toLowerCase().trim();
+        if (l === "c") return { label: "C", tag: "GCC 13.3", icon: "⚙️" };
+        if (l === "cpp" || l === "c++") return { label: "C++", tag: "G++ 13.3", icon: "⚡" };
+        if (l === "python" || l === "py") return { label: "Python", tag: "Python 3", icon: "🐍" };
+        if (l === "java") return { label: "Java", tag: "OpenJDK 21", icon: "☕" };
+        if (l === "javascript" || l === "js") return { label: "JavaScript", tag: "Node.js 22", icon: "🌐" };
+        return { label: lang, tag: "Native Compiler", icon: "💻" };
+    };
+
     const getStatusStyle = (status) => {
         if (status === "accepted") {
-            return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+            return "border-emerald-500/40 bg-emerald-500/15 text-emerald-300";
         }
 
-        if (status === "error" || status === "system_error") {
+        if (status === "wrong_answer") {
+            return "border-red-500/40 bg-red-500/15 text-red-300";
+        }
+
+        if (status === "compile_error") {
+            return "border-rose-500/30 bg-rose-500/10 text-rose-300";
+        }
+
+        if (status === "time_limit") {
+            return "border-orange-500/30 bg-orange-500/10 text-orange-300";
+        }
+
+        if (status === "runtime_error" || status === "error" || status === "system_error") {
             return "border-red-500/30 bg-red-500/10 text-red-300";
         }
 
@@ -504,7 +601,9 @@ function BugSnap() {
                         {questions.map((question, index) => {
                             const result = results[question._id];
                             const isSubmitting = submittingId === question._id;
+                            const isTesting = testingId === question._id;
                             const isAccepted = result?.status === "accepted";
+                            const compilerInfo = getCompilerBadge(question.language);
 
                             return (
                                 <article
@@ -525,12 +624,12 @@ function BugSnap() {
                                                 </span>
                                                 {isAccepted && (
                                                     <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-400">
-                                                        ✓ Solved (+{question.points} pts)
+                                                        ✓ Right Answer (Solved)
                                                     </span>
                                                 )}
                                             </div>
-                                            <span className="text-sm font-semibold text-amber-400">
-                                                {question.points} points
+                                            <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-slate-800/80 border border-slate-700/60 text-slate-300">
+                                                {isAccepted ? "1/1 Solved" : "1 Bug"}
                                             </span>
                                         </div>
 
@@ -549,9 +648,12 @@ function BugSnap() {
                                                 <h3 className="text-sm font-semibold text-slate-200">
                                                     Buggy code (Protected View)
                                                 </h3>
-                                                <span className="text-xs uppercase text-slate-500">
-                                                    {question.language}
-                                                </span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700/80 bg-slate-855 px-2.5 py-1 text-xs font-medium text-slate-300">
+                                                        <span>{compilerInfo.icon}</span>
+                                                        <span className="font-mono">{compilerInfo.tag}</span>
+                                                    </span>
+                                                </div>
                                             </div>
 
                                             <ProctoredCodeViewer
@@ -567,10 +669,16 @@ function BugSnap() {
 
                                         <section>
                                             <div className="mb-3 flex items-center justify-between gap-3">
-                                                <h3 className="text-sm font-semibold text-slate-200">
-                                                    Your solution
-                                                </h3>
-                                                <span className="rounded-md bg-slate-800 px-2 py-1 text-xs text-slate-400">
+                                                <div className="flex items-center gap-2">
+                                                    <h3 className="text-sm font-semibold text-slate-200">
+                                                        Your solution
+                                                    </h3>
+                                                    <span className="inline-flex items-center gap-1 rounded-md border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[11px] font-semibold text-blue-400">
+                                                        <span>{compilerInfo.icon}</span>
+                                                        <span>{compilerInfo.tag}</span>
+                                                    </span>
+                                                </div>
+                                                <span className="rounded-md bg-slate-800 px-2.5 py-1 text-xs text-slate-400 uppercase font-mono font-semibold">
                                                     {question.language}
                                                 </span>
                                             </div>
@@ -608,81 +716,114 @@ function BugSnap() {
                                                 }
                                             />
 
-                                            <button
-                                                onClick={() => handleSubmit(question)}
-                                                disabled={isSubmitting || isFinalSubmitted || isAccepted}
-                                                className={`mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl px-5 py-3.5 font-semibold text-white transition disabled:cursor-not-allowed sm:w-auto ${isFinalSubmitted
-                                                    ? "bg-slate-800 text-slate-500 cursor-not-allowed opacity-75"
-                                                    : isAccepted
-                                                        ? "bg-emerald-600/40 text-emerald-300 cursor-not-allowed"
-                                                        : "bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20 active:scale-95"
-                                                    }`}
-                                            >
-                                                {isSubmitting ? (
-                                                    <>
-                                                        <LoaderCircle
-                                                            size={18}
-                                                            className="animate-spin"
-                                                        />
-                                                        Evaluating...
-                                                    </>
-                                                ) : isFinalSubmitted ? (
-                                                    <>
-                                                        <Lock size={16} />
-                                                        Round Finalized
-                                                    </>
-                                                ) : isAccepted ? (
-                                                    <>
-                                                        <CheckCircle2 size={16} />
-                                                        Solution Accepted
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <Play size={17} />
-                                                        Submit solution
-                                                    </>
-                                                )}
-                                            </button>
+                                            {/* Action Buttons: Test Code & Submit Solution */}
+                                            <div className="mt-4 flex flex-wrap items-center gap-3">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleRunTest(question)}
+                                                    disabled={isTesting || isSubmitting || isFinalSubmitted}
+                                                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-850 hover:bg-slate-800 hover:border-slate-600 px-4 py-3 text-sm font-semibold text-slate-200 transition disabled:cursor-not-allowed disabled:opacity-50"
+                                                >
+                                                    {isTesting ? (
+                                                        <>
+                                                            <LoaderCircle size={16} className="animate-spin text-blue-400" />
+                                                            Compiling & Testing...
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Terminal size={16} className="text-blue-400" />
+                                                            Test Code ({compilerInfo.tag})
+                                                        </>
+                                                    )}
+                                                </button>
+
+                                                <button
+                                                    onClick={() => handleSubmit(question)}
+                                                    disabled={isSubmitting || isTesting || isFinalSubmitted || isAccepted}
+                                                    className={`inline-flex items-center justify-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold text-white transition disabled:cursor-not-allowed ${isFinalSubmitted
+                                                        ? "bg-slate-800 text-slate-500 cursor-not-allowed opacity-75"
+                                                        : isAccepted
+                                                            ? "bg-emerald-600/40 text-emerald-300 cursor-not-allowed"
+                                                            : "bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/20 active:scale-95"
+                                                        }`}
+                                                >
+                                                    {isSubmitting ? (
+                                                        <>
+                                                            <LoaderCircle
+                                                                size={16}
+                                                                className="animate-spin"
+                                                            />
+                                                            Evaluating with Compiler...
+                                                        </>
+                                                    ) : isFinalSubmitted ? (
+                                                        <>
+                                                            <Lock size={16} />
+                                                            Round Finalized
+                                                        </>
+                                                    ) : isAccepted ? (
+                                                        <>
+                                                            <CheckCircle2 size={16} />
+                                                            Right Answer (Solved)
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <Play size={16} />
+                                                            Submit solution
+                                                        </>
+                                                    )}
+                                                </button>
+                                            </div>
                                         </section>
                                     </div>
 
+                                    {/* Evaluation Result & Compiler Output Terminal */}
                                     {result && (
                                         <div className="border-t border-slate-800 p-6 sm:px-8">
                                             <div
-                                                className={`rounded-xl border p-5 ${getStatusStyle(result.status)}`}
+                                                className={`rounded-2xl border p-5 ${getStatusStyle(result.status)}`}
                                             >
                                                 <div className="flex flex-wrap items-center justify-between gap-3">
-                                                    <div className="flex items-center gap-2 font-semibold">
+                                                    <div className="flex items-center gap-2.5 font-semibold">
                                                         {result.status === "accepted" ? (
-                                                            <CheckCircle2 size={20} />
-                                                        ) : result.status === "error" ||
-                                                            result.status === "system_error" ? (
-                                                            <XCircle size={20} />
+                                                            <>
+                                                                <CheckCircle2 size={22} className="text-emerald-400 shrink-0" />
+                                                                <span className="font-extrabold text-emerald-300 text-sm sm:text-base tracking-wide">
+                                                                    ✓ RIGHT ANSWER (CORRECT)
+                                                                </span>
+                                                            </>
                                                         ) : (
-                                                            <Bug size={20} />
+                                                            <>
+                                                                <XCircle size={22} className="text-red-400 shrink-0" />
+                                                                <span className="font-extrabold text-red-300 text-sm sm:text-base tracking-wide">
+                                                                    ✗ WRONG ANSWER (INCORRECT)
+                                                                </span>
+                                                            </>
                                                         )}
-                                                        <span className="capitalize">
-                                                            {result.status.replaceAll("_", " ")}
-                                                        </span>
+                                                        {result.isTestRun && (
+                                                            <span className="rounded-md border border-slate-700 bg-slate-800/80 px-2 py-0.5 text-[10px] font-semibold text-slate-300">
+                                                                Test Run Only
+                                                            </span>
+                                                        )}
                                                     </div>
 
-                                                    {result.score !== undefined && (
-                                                        <span className="font-bold">
-                                                            {result.score} / {question.points} points
-                                                        </span>
-                                                    )}
+                                                    <div className="flex items-center gap-3">
+                                                        {!result.isTestRun && (
+                                                            <span className={`font-bold text-xs uppercase tracking-wider px-2 py-0.5 rounded ${result.status === "accepted" ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"}`}>
+                                                                {result.status === "accepted" ? "1/1 Debugged" : "0/1 Debugged"}
+                                                            </span>
+                                                        )}
+                                                        {result.executionTime != null && (
+                                                            <span className="flex items-center gap-1.5 text-xs opacity-75 font-mono">
+                                                                <Clock3 size={13} />
+                                                                {result.executionTime}s
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </div>
 
-                                                <p className="mt-3 wrap-break-words text-sm leading-6 opacity-90">
+                                                <p className="mt-2.5 wrap-break-words text-sm leading-6 opacity-95 font-medium">
                                                     {result.message}
                                                 </p>
-
-                                                {result.executionTime != null && (
-                                                    <p className="mt-3 flex items-center gap-2 text-xs opacity-75">
-                                                        <Clock3 size={14} />
-                                                        Execution time: {result.executionTime}s
-                                                    </p>
-                                                )}
                                             </div>
                                         </div>
                                     )}
@@ -734,8 +875,8 @@ function BugSnap() {
                                             {submission.status?.replaceAll("_", " ") || "Unknown"}
                                         </span>
 
-                                        <span className="text-sm font-bold text-amber-400">
-                                            {submission.score ?? 0} points
+                                        <span className={`text-xs font-semibold px-2 py-0.5 rounded ${submission.status === "accepted" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-slate-800 text-slate-400"}`}>
+                                            {submission.status === "accepted" ? "1/1 Solved" : "0/1 Solved"}
                                         </span>
                                     </div>
                                 </div>

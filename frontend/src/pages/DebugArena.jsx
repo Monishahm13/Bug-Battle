@@ -26,11 +26,11 @@ import { API_BASE_URL } from "../config/api";
 const API = API_BASE_URL;
 
 const ARENA_LANGUAGES = [
-    { id: "c", label: "C", tag: "GCC 9.2", icon: "⚙️", color: "blue" },
-    { id: "cpp", label: "C++", tag: "G++ 9.2", icon: "⚡", color: "sky" },
-    { id: "python", label: "Python", tag: "Python 3.8", icon: "🐍", color: "emerald" },
-    { id: "java", label: "Java", tag: "OpenJDK 13", icon: "☕", color: "amber" },
-    { id: "javascript", label: "JavaScript", tag: "Node.js 12", icon: "🌐", color: "yellow" },
+    { id: "c", label: "C", tag: "GCC 13.3", icon: "⚙️", color: "blue" },
+    { id: "cpp", label: "C++", tag: "G++ 13.3", icon: "⚡", color: "sky" },
+    { id: "python", label: "Python", tag: "Python 3", icon: "🐍", color: "emerald" },
+    { id: "java", label: "Java", tag: "OpenJDK 21", icon: "☕", color: "amber" },
+    { id: "javascript", label: "JavaScript", tag: "Node.js 22", icon: "🌐", color: "yellow" },
 ];
 
 const normalizeLang = (lang) => {
@@ -791,14 +791,14 @@ function DebugArena() {
                                                             {question.language}
                                                         </span>
                                                         <span className="rounded-lg bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 text-xs font-bold text-amber-400 uppercase">
-                                                            {question.difficulty} — {question.points} pts
+                                                            {question.difficulty} — {errorCount} Errors
                                                         </span>
                                                         <span className="rounded-lg bg-red-500/10 border border-red-500/20 px-2.5 py-1 text-xs font-bold text-red-400">
                                                             🐛 {errorCount} Intentional Bugs
                                                         </span>
                                                         {fixedCount > 0 && (
                                                             <span className="rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-xs font-bold text-emerald-400">
-                                                                ✓ {fixedCount}/{bugList.length} Debugged (+{earnedScore} pts)
+                                                                ✓ {fixedCount}/{bugList.length} Debugged
                                                             </span>
                                                         )}
                                                         {question.isTieBreaker && (
@@ -820,7 +820,7 @@ function DebugArena() {
                                                     {isAccepted ? (
                                                         <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 px-4 py-2 text-emerald-400 text-sm font-bold">
                                                             <CheckCircle2 size={18} />
-                                                            Solved (+{earnedScore} pts)
+                                                            Solved ({bugList.length}/{bugList.length})
                                                         </div>
                                                     ) : (
                                                         <button
@@ -835,25 +835,20 @@ function DebugArena() {
                                                 </div>
                                             </div>
 
-                                            {/* Bug Tracker with Automatic Tick Marks & Points */}
+                                            {/* Bug Tracker with Automatic Tick Marks */}
                                             <div className="my-6 rounded-2xl border border-slate-800/80 bg-slate-950/70 p-4 sm:p-5">
                                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3.5">
                                                     <div>
                                                         <div className="flex items-center gap-2">
                                                             <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                                                                Bugs Debugged:
+                                                                Errors Debugged:
                                                             </span>
-                                                            <span className="text-xs font-mono font-bold text-violet-400">
-                                                                {fixedCount} / {bugList.length} Resolved
+                                                            <span className="text-sm font-mono font-extrabold text-violet-400 bg-violet-500/10 px-2.5 py-0.5 rounded-lg border border-violet-500/30">
+                                                                {fixedCount} / {bugList.length}
                                                             </span>
-                                                            {fixedCount > 0 && (
-                                                                <span className="rounded-md bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 text-[11px] font-bold text-emerald-400">
-                                                                    +{earnedScore} pts earned
-                                                                </span>
-                                                            )}
                                                         </div>
-                                                        <p className="text-[11px] text-slate-400 mt-0.5">
-                                                            Compile your code to evaluate fixes. Each error debugged gives <span className="text-amber-400 font-semibold">1 point</span>.
+                                                        <p className="text-[11px] text-slate-400 mt-1">
+                                                            Compile your code to evaluate fixes. Debug each error until all {bugList.length} errors are resolved.
                                                         </p>
                                                     </div>
                                                     <div className="text-xs font-medium">
@@ -899,7 +894,7 @@ function DebugArena() {
                                                                 </div>
                                                                 {isFixed ? (
                                                                     <span className="shrink-0 text-[10px] font-bold text-emerald-400 bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30">
-                                                                        ✓ +1 pt
+                                                                        ✓ Fixed
                                                                     </span>
                                                                 ) : (
                                                                     <span className="shrink-0 text-[10px] text-slate-600 font-mono">
@@ -959,78 +954,63 @@ function DebugArena() {
                                             {/* Compiler Output & Execution Terminal */}
                                             {(currentCompileOut || result) && (
                                                 <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/90 overflow-hidden shadow-lg">
-                                                    <div className="flex items-center justify-between px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 text-xs">
+                                                    <div className="flex items-center justify-between px-4 py-3 bg-slate-900/90 border-b border-slate-800 text-xs">
                                                         <div className="flex items-center gap-2">
-                                                            <Terminal size={14} className="text-violet-400" />
+                                                            <Terminal size={15} className="text-violet-400" />
                                                             <span className="font-bold uppercase tracking-wider text-slate-300">
-                                                                Compilation & Execution Terminal
+                                                                Execution Terminal
                                                             </span>
                                                         </div>
                                                         <div className="flex items-center gap-3">
-                                                            <span className="text-xs font-mono text-emerald-400 font-semibold">
-                                                                Score: +{earnedScore} pts ({fixedCount}/{bugList.length} fixed)
-                                                            </span>
                                                             <span
-                                                                className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
-                                                                    isAccepted || fixedCount === bugList.length
-                                                                        ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                                                                        : fixedCount > 0
-                                                                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
-                                                                            : "bg-slate-800 text-slate-400 border border-slate-700"
+                                                                className={`px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider flex items-center gap-1.5 ${
+                                                                    isAccepted
+                                                                        ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                                                                        : "bg-red-500/20 text-red-300 border border-red-500/40"
                                                                 }`}
                                                             >
-                                                                {isAccepted || fixedCount === bugList.length
-                                                                    ? "All Bugs Resolved"
-                                                                    : fixedCount > 0
-                                                                        ? `${fixedCount}/${bugList.length} Errors Debugged`
-                                                                        : "Ready for Debugging"}
+                                                                {isAccepted ? (
+                                                                    <>
+                                                                        <CheckCircle2 size={14} className="text-emerald-400" />
+                                                                        ✓ RIGHT ANSWER (CORRECT)
+                                                                    </>
+                                                                ) : (
+                                                                    <>
+                                                                        <XCircle size={14} className="text-red-400" />
+                                                                        ✗ WRONG ANSWER (INCORRECT)
+                                                                    </>
+                                                                )}
+                                                            </span>
+                                                            <span className={`text-xs font-mono font-bold ${isAccepted ? "text-emerald-400" : "text-violet-400"}`}>
+                                                                Progress: {fixedCount} / {bugList.length} Errors Debugged
                                                             </span>
                                                         </div>
                                                     </div>
 
                                                     <div className="p-4 space-y-3 font-mono text-xs">
-                                                        {/* Compiler Output / Errors if any */}
-                                                        {(currentCompileOut?.compileOutput || result?.compileOutput) && (
-                                                            <div>
-                                                                <div className="text-[11px] font-semibold text-rose-400 mb-1">
-                                                                    Compiler Output / Warnings:
+                                                        {/* Clean evaluation message without compiler traces */}
+                                                        {(currentCompileOut?.judgeMessage || result?.judgeMessage) && (
+                                                            <div className="rounded-xl bg-slate-950 p-3.5 text-slate-200 border border-slate-800 text-xs leading-relaxed flex items-center justify-between">
+                                                                <div className="flex items-center gap-2.5">
+                                                                    {isAccepted ? (
+                                                                        <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                                                                    ) : (
+                                                                        <div className="h-2 w-2 rounded-full bg-violet-400 animate-pulse shrink-0" />
+                                                                    )}
+                                                                    <span>
+                                                                        {currentCompileOut?.judgeMessage || result?.judgeMessage}
+                                                                    </span>
                                                                 </div>
-                                                                <pre className="rounded-xl bg-slate-950 p-3 text-rose-300/90 border border-rose-500/20 overflow-x-auto max-h-40 whitespace-pre-wrap">
-                                                                    {currentCompileOut?.compileOutput || result?.compileOutput}
-                                                                </pre>
+                                                                <span className="font-mono font-bold text-violet-400 text-xs">
+                                                                    {fixedCount}/{bugList.length}
+                                                                </span>
                                                             </div>
                                                         )}
 
-                                                        {/* Standard Output if any */}
-                                                        {(currentCompileOut?.stdout || result?.stdout) && (
-                                                            <div>
-                                                                <div className="text-[11px] font-semibold text-emerald-400 mb-1">
-                                                                    Program Output (stdout):
-                                                                </div>
-                                                                <pre className="rounded-xl bg-slate-950 p-3 text-emerald-300/90 border border-emerald-500/20 overflow-x-auto max-h-40 whitespace-pre-wrap">
-                                                                    {currentCompileOut?.stdout || result?.stdout}
-                                                                </pre>
-                                                            </div>
-                                                        )}
-
-                                                        {/* Judge feedback / message */}
-                                                        {(currentCompileOut?.judgeMessage || result?.judgeMessage) &&
-                                                         (currentCompileOut?.judgeMessage || result?.judgeMessage) !== (currentCompileOut?.compileOutput || result?.compileOutput) && (
-                                                            <div>
-                                                                <div className="text-[11px] font-semibold text-slate-400 mb-1">
-                                                                    Evaluation Details:
-                                                                </div>
-                                                                <pre className="rounded-xl bg-slate-950 p-3 text-slate-300 border border-slate-800 overflow-x-auto max-h-36 whitespace-pre-wrap">
-                                                                    {currentCompileOut?.judgeMessage || result?.judgeMessage}
-                                                                </pre>
-                                                            </div>
-                                                        )}
-
-                                                        {/* If fully clean */}
-                                                        {!(currentCompileOut?.compileOutput || result?.compileOutput) && !(currentCompileOut?.stdout || result?.stdout) && isAccepted && (
-                                                            <div className="flex items-center gap-2 text-emerald-400 py-1">
+                                                        {isAccepted && (
+                                                            <div className="flex items-center gap-2 text-emerald-400 py-1 font-semibold">
                                                                 <CheckCircle2 size={16} />
-                                                                <span>Code compiled cleanly and passed all test cases with 0 errors! (+{question.points} pts)</span>
+                                                                <span>Clean code passed all checks with all {bugList.length}/{bugList.length} errors debugged!</span>
                                                             </div>
                                                         )}
                                                     </div>
@@ -1042,7 +1022,7 @@ function DebugArena() {
                                                 <div className="text-xs text-slate-400 flex items-center gap-2">
                                                     <Sparkles size={14} className="text-violet-400 shrink-0" />
                                                     <span>
-                                                        Click <strong className="text-slate-200">Compile Code</strong> to compile your fixes. Each fixed error grants <strong className="text-emerald-400">+1 point</strong>.
+                                                        Click <strong className="text-slate-200">Compile Code</strong> to evaluate your fixes. Progress updates as errors are debugged ({fixedCount}/{bugList.length}).
                                                     </span>
                                                 </div>
 

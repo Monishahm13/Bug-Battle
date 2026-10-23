@@ -9,8 +9,14 @@ import {
     LoaderCircle,
     AlertCircle,
     Sparkles,
-    ShieldAlert
+    ShieldAlert,
+    FileSpreadsheet,
+    FileText
 } from "lucide-react";
+import {
+    exportParticipantsToExcel,
+    exportParticipantsToPDF
+} from "../utils/exportUtils";
 import { getAuthToken, getAuthUser } from "../utils/auth";
 import { API_BASE_URL } from "../config/api";
 
@@ -21,6 +27,7 @@ function Leaderboard() {
 
     const [isOrganizer, setIsOrganizer] = useState(() => getAuthUser()?.role === "organizer");
     const [leaderboard, setLeaderboard] = useState([]);
+    const [qualificationData, setQualificationData] = useState(null);
     const [eventName, setEventName] = useState("BUG BATTLE 2026");
     const [eventData, setEventData] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -82,6 +89,16 @@ function Leaderboard() {
             );
 
             setLeaderboard(response.data.leaderboard || []);
+
+            // Also fetch participant qualification data for Excel / PDF exports
+            try {
+                const qualRes = await axios.get(`${API}/events/${activeEvent._id}/qualification`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                setQualificationData(qualRes.data);
+            } catch (qualErr) {
+                console.error("Error loading qualification for exports:", qualErr);
+            }
         } catch (err) {
             setError(
                 err.response?.data?.message ||
@@ -187,18 +204,56 @@ function Leaderboard() {
                             </p>
                         </div>
 
-                        <button
-                            onClick={() => fetchLeaderboard(true)}
-                            disabled={loading || refreshing}
-                            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/90 px-4 py-3 text-sm font-semibold transition hover:border-blue-500 disabled:opacity-50 shrink-0"
-                        >
-                            {refreshing ? (
-                                <LoaderCircle size={17} className="animate-spin text-blue-400" />
-                            ) : (
-                                <RefreshCw size={17} />
-                            )}
-                            Refresh Scores
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const bugSnapList = qualificationData?.bugSnapParticipants || [];
+                                    const debugArenaList = qualificationData?.debugArenaParticipants || [];
+                                    exportParticipantsToExcel({
+                                        eventName: eventName || "Bug_Battle_2026",
+                                        bugSnapList,
+                                        debugArenaList
+                                    });
+                                }}
+                                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-3 text-xs font-bold shadow-lg shadow-emerald-600/20 active:scale-95 transition"
+                                title="Download Excel spreadsheet (.xlsx)"
+                            >
+                                <FileSpreadsheet size={15} />
+                                <span>Download Excel (.xlsx)</span>
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const bugSnapList = qualificationData?.bugSnapParticipants || [];
+                                    const debugArenaList = qualificationData?.debugArenaParticipants || [];
+                                    exportParticipantsToPDF({
+                                        eventName: eventName || "Bug_Battle_2026",
+                                        bugSnapList,
+                                        debugArenaList
+                                    });
+                                }}
+                                className="inline-flex items-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white px-3.5 py-3 text-xs font-bold shadow-lg shadow-rose-600/20 active:scale-95 transition"
+                                title="Download PDF document (.pdf)"
+                            >
+                                <FileText size={15} />
+                                <span>Download PDF (.pdf)</span>
+                            </button>
+
+                            <button
+                                onClick={() => fetchLeaderboard(true)}
+                                disabled={loading || refreshing}
+                                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-800/90 px-4 py-3 text-sm font-semibold transition hover:border-blue-500 disabled:opacity-50"
+                            >
+                                {refreshing ? (
+                                    <LoaderCircle size={17} className="animate-spin text-blue-400" />
+                                ) : (
+                                    <RefreshCw size={17} />
+                                )}
+                                Refresh Scores
+                            </button>
+                        </div>
                     </div>
                 </section>
 
