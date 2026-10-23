@@ -292,7 +292,7 @@ function Dashboard() {
         }
     };
 
-    const handleStartRound = async (phase, durationMinutes) => {
+    const handleStartRound = async (phase, durationMinutes, shouldNavigate = false) => {
         if (!activeEvent) return;
         setUpdatingEvent(true);
         setOrganizerMsg("");
@@ -318,6 +318,10 @@ function Dashboard() {
             setActiveEvent(response.data.event);
             setOrganizerMsg(response.data.message || `Round ${phase} started successfully!`);
             if (activeEvent?._id) fetchQualificationData(activeEvent._id);
+
+            if (shouldNavigate) {
+                navigate(phase === "bug_snap" ? "/bugsnap" : "/debug-arena");
+            }
         } catch (err) {
             setOrganizerMsg(err.response?.data?.message || `Failed to start ${phase}`);
         } finally {
@@ -913,110 +917,122 @@ function Dashboard() {
 
                                 <div className="grid gap-4 sm:grid-cols-2">
                                     {/* Round 1 Card */}
-                                    <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <div className="flex items-center gap-2">
-                                                <div className="rounded-lg bg-blue-500/10 p-2 text-blue-400 border border-blue-500/20">
-                                                    <Bug size={18} />
+                                    <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 flex flex-col justify-between">
+                                        <div>
+                                            <div className="flex items-center justify-between mb-3">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="rounded-lg bg-blue-500/10 p-2 text-blue-400 border border-blue-500/20">
+                                                        <Bug size={18} />
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-xs font-bold text-white block">Phase 1: BUG SNAP</span>
+                                                        <span className="text-[10px] text-slate-400">20 Minute Limit</span>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <span className="text-xs font-bold text-white block">Phase 1: BUG SNAP</span>
-                                                    <span className="text-[10px] text-slate-400">20 Minute Limit</span>
-                                                </div>
+                                                <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                                                    activeEvent?.roundControl?.bug_snap?.isStarted
+                                                        ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
+                                                        : "bg-slate-800 text-slate-400"
+                                                }`}>
+                                                    {activeEvent?.roundControl?.bug_snap?.isStarted ? "● LIVE IN PROGRESS" : "NOT STARTED"}
+                                                </span>
                                             </div>
-                                            <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                                                activeEvent?.roundControl?.bug_snap?.isStarted
-                                                    ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
-                                                    : "bg-slate-800 text-slate-400"
-                                            }`}>
-                                                {activeEvent?.roundControl?.bug_snap?.isStarted ? "● LIVE IN PROGRESS" : "NOT STARTED"}
-                                            </span>
                                         </div>
 
-                                        <div className="flex items-center gap-2">
-                                            {!activeEvent?.roundControl?.bug_snap?.isStarted ? (
+                                        <div className="flex flex-col gap-2 mt-2">
+                                            <div className="flex items-center gap-2">
                                                 <button
                                                     type="button"
                                                     disabled={updatingEvent}
-                                                    onClick={() => handleStartRound("bug_snap", 20)}
-                                                    className="flex-1 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-bold py-2 px-3 text-xs shadow-md shadow-blue-600/30 transition flex items-center justify-center gap-1.5"
+                                                    onClick={() => handleStartRound("bug_snap", 20, true)}
+                                                    className="flex-1 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-bold py-2.5 px-3 text-xs shadow-md shadow-blue-600/30 transition flex items-center justify-center gap-1.5"
                                                 >
                                                     <Play size={14} fill="currentColor" />
-                                                    <span>Start Bug Snap (20 Min)</span>
+                                                    <span>{activeEvent?.roundControl?.bug_snap?.isStarted ? "Restart & Enter Bug Snap" : "Start & Enter Bug Snap (20m)"}</span>
                                                 </button>
-                                            ) : (
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => navigate("/bugsnap")}
+                                                    className="rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 px-3.5 py-2.5 text-xs font-bold transition flex items-center gap-1.5"
+                                                    title="Open Bug Snap Challenge"
+                                                >
+                                                    <span>Enter</span>
+                                                    <ArrowUpRight size={14} />
+                                                </button>
+                                            </div>
+
+                                            {activeEvent?.roundControl?.bug_snap?.isStarted && (
                                                 <button
                                                     type="button"
                                                     disabled={updatingEvent}
                                                     onClick={() => handleResetRound("bug_snap")}
-                                                    className="flex-1 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-bold py-2 px-3 text-xs transition flex items-center justify-center gap-1.5"
+                                                    className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-semibold py-1.5 px-3 text-[11px] transition flex items-center justify-center gap-1.5"
                                                 >
-                                                    <RotateCcw size={13} />
-                                                    <span>Reset Bug Snap</span>
+                                                    <RotateCcw size={12} />
+                                                    <span>Reset Bug Snap Round</span>
                                                 </button>
                                             )}
-                                            <button
-                                                type="button"
-                                                onClick={() => navigate("/bugsnap")}
-                                                className="rounded-xl border border-slate-700 hover:border-slate-500 bg-slate-900 text-slate-300 px-3 py-2 text-xs font-semibold transition"
-                                                title="Open Bug Snap Page"
-                                            >
-                                                <ArrowUpRight size={15} />
-                                            </button>
                                         </div>
                                     </div>
 
                                     {/* Round 2 Card */}
-                                    <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4">
-                                        <div className="flex items-center justify-between mb-3">
-                                            <div className="flex items-center gap-2">
-                                                <div className="rounded-lg bg-violet-500/10 p-2 text-violet-400 border border-violet-500/20">
-                                                    <Code2 size={18} />
+                                    <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-4 flex flex-col justify-between">
+                                        <div>
+                                            <div className="flex items-center justify-between mb-3">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="rounded-lg bg-violet-500/10 p-2 text-violet-400 border border-violet-500/20">
+                                                        <Code2 size={18} />
+                                                    </div>
+                                                    <div>
+                                                        <span className="text-xs font-bold text-white block">Phase 2: DEBUG ARENA</span>
+                                                        <span className="text-[10px] text-slate-400">30 Minute Limit</span>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <span className="text-xs font-bold text-white block">Phase 2: DEBUG ARENA</span>
-                                                    <span className="text-[10px] text-slate-400">30 Minute Limit</span>
-                                                </div>
+                                                <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                                                    activeEvent?.roundControl?.debug_arena?.isStarted
+                                                        ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
+                                                        : "bg-slate-800 text-slate-400"
+                                                }`}>
+                                                    {activeEvent?.roundControl?.debug_arena?.isStarted ? "● LIVE IN PROGRESS" : "NOT STARTED"}
+                                                </span>
                                             </div>
-                                            <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                                                activeEvent?.roundControl?.debug_arena?.isStarted
-                                                    ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400"
-                                                    : "bg-slate-800 text-slate-400"
-                                            }`}>
-                                                {activeEvent?.roundControl?.debug_arena?.isStarted ? "● LIVE IN PROGRESS" : "NOT STARTED"}
-                                            </span>
                                         </div>
 
-                                        <div className="flex items-center gap-2">
-                                            {!activeEvent?.roundControl?.debug_arena?.isStarted ? (
+                                        <div className="flex flex-col gap-2 mt-2">
+                                            <div className="flex items-center gap-2">
                                                 <button
                                                     type="button"
                                                     disabled={updatingEvent}
-                                                    onClick={() => handleStartRound("debug_arena", 30)}
-                                                    className="flex-1 rounded-xl bg-violet-600 hover:bg-violet-500 active:scale-95 text-white font-bold py-2 px-3 text-xs shadow-md shadow-violet-600/30 transition flex items-center justify-center gap-1.5"
+                                                    onClick={() => handleStartRound("debug_arena", 30, true)}
+                                                    className="flex-1 rounded-xl bg-violet-600 hover:bg-violet-500 active:scale-95 text-white font-bold py-2.5 px-3 text-xs shadow-md shadow-violet-600/30 transition flex items-center justify-center gap-1.5"
                                                 >
                                                     <Play size={14} fill="currentColor" />
-                                                    <span>Start Arena (30 Min)</span>
+                                                    <span>{activeEvent?.roundControl?.debug_arena?.isStarted ? "Restart & Enter Arena" : "Start & Enter Arena (30m)"}</span>
                                                 </button>
-                                            ) : (
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => navigate("/debug-arena")}
+                                                    className="rounded-xl border border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 px-3.5 py-2.5 text-xs font-bold transition flex items-center gap-1.5"
+                                                    title="Open Debug Arena Challenge"
+                                                >
+                                                    <span>Enter</span>
+                                                    <ArrowUpRight size={14} />
+                                                </button>
+                                            </div>
+
+                                            {activeEvent?.roundControl?.debug_arena?.isStarted && (
                                                 <button
                                                     type="button"
                                                     disabled={updatingEvent}
                                                     onClick={() => handleResetRound("debug_arena")}
-                                                    className="flex-1 rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-bold py-2 px-3 text-xs transition flex items-center justify-center gap-1.5"
+                                                    className="w-full rounded-xl border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 font-semibold py-1.5 px-3 text-[11px] transition flex items-center justify-center gap-1.5"
                                                 >
-                                                    <RotateCcw size={13} />
-                                                    <span>Reset Arena</span>
+                                                    <RotateCcw size={12} />
+                                                    <span>Reset Arena Round</span>
                                                 </button>
                                             )}
-                                            <button
-                                                type="button"
-                                                onClick={() => navigate("/debug-arena")}
-                                                className="rounded-xl border border-slate-700 hover:border-slate-500 bg-slate-900 text-slate-300 px-3 py-2 text-xs font-semibold transition"
-                                                title="Open Debug Arena Page"
-                                            >
-                                                <ArrowUpRight size={15} />
-                                            </button>
                                         </div>
                                     </div>
                                 </div>

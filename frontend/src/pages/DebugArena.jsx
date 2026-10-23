@@ -106,28 +106,30 @@ function DebugArena() {
                 return;
             }
 
-            // Check if final submission already recorded in scoped user storage
-            const currentUserId = userData?._id || userData?.id || "";
-            const localKey = `bugbattle_timer_${currentUserId ? currentUserId + "_" : ""}${event._id}_debug_arena`;
-            const savedLocal = sessionStorage.getItem(localKey) || localStorage.getItem(localKey);
-            if (savedLocal) {
+            // Check if final submission already recorded in scoped user storage (participants only)
+            if (userData?.role !== "organizer") {
+                const currentUserId = userData?._id || userData?.id || "";
+                const localKey = `bugbattle_timer_${currentUserId ? currentUserId + "_" : ""}${event._id}_debug_arena`;
+                const savedLocal = sessionStorage.getItem(localKey) || localStorage.getItem(localKey);
+                if (savedLocal) {
+                    try {
+                        const parsed = JSON.parse(savedLocal);
+                        if (parsed.isFinalSubmitted) {
+                            setIsFinalSubmitted(true);
+                        }
+                    } catch { }
+                }
+
+                // Check server team timer for finality
                 try {
-                    const parsed = JSON.parse(savedLocal);
-                    if (parsed.isFinalSubmitted) {
+                    const timerRes = await axios.get(`${API}/teams/timer/debug_arena`, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (timerRes.data?.timer?.isSubmitted) {
                         setIsFinalSubmitted(true);
                     }
                 } catch { }
             }
-
-            // Check server team timer for finality
-            try {
-                const timerRes = await axios.get(`${API}/teams/timer/debug_arena`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (timerRes.data?.timer?.isSubmitted) {
-                    setIsFinalSubmitted(true);
-                }
-            } catch { }
 
             // 3. Get qualification status
             try {
@@ -462,7 +464,7 @@ function DebugArena() {
     const qualifyingScore = activeEvent?.qualifyingScore || 15;
     const isQualified = myTeam ? myTeam.isQualified : false;
     const phase1Score = myTeam ? myTeam.phase1Score : 0;
-    const isPhase2Live = activeEvent?.status === "live" && activeEvent?.phase === "debug_arena";
+    const isPhase2Live = activeEvent?.status === "live" && (activeEvent?.phase === "debug_arena" || Boolean(activeEvent?.roundControl?.debug_arena?.isStarted));
     const canAccessChallenges = isPhase2Live || isOrganizer;
 
     const displayedQuestions = questions.filter(
@@ -588,10 +590,13 @@ function DebugArena() {
                     <RoundTimer
                         phase="debug_arena"
                         phaseName="DEBUG ARENA"
-                        durationMinutes={30}
+                        durationMinutes={activeEvent?.roundControl?.debug_arena?.durationMinutes || 30}
                         eventId={activeEvent?._id || "active"}
                         userId={user?._id || user?.id || ""}
                         userName={user?.name || user?.email || ""}
+                        isRoundStarted={isOrganizer ? true : Boolean(activeEvent?.roundControl?.debug_arena?.isStarted || activeEvent?.phase === "debug_arena")}
+                        serverStartedAt={activeEvent?.roundControl?.debug_arena?.startedAt}
+                        serverEndsAt={activeEvent?.roundControl?.debug_arena?.endsAt}
                         isQuestionsLoaded={questions.length > 0}
                         isFinalSubmitted={isFinalSubmitted}
                         onTimeUp={handleAutoSubmitAll}

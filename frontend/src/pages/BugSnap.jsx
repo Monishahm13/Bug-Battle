@@ -83,41 +83,45 @@ function BugSnap() {
                 );
 
                 const events = eventResponse.data.events || [];
+                const isUserOrganizer = currentUser?.role === "organizer";
+
                 const currentActiveEvent = events.find(
                     (event) =>
                         event.status === "live" &&
-                        event.phase === "bug_snap"
-                );
+                        (event.phase === "bug_snap" || Boolean(event.roundControl?.bug_snap?.isStarted))
+                ) || (isUserOrganizer ? (events.find((e) => e.status === "live") || events[0]) : null);
 
                 if (!currentActiveEvent) {
-                    setError("There is no live BUG SNAP event right now.");
+                    setError("There is no live BUG SNAP event right now. Please wait for the organizer to launch the round.");
                     return;
                 }
 
                 setActiveEvent(currentActiveEvent);
 
-                // Check if final submission already completed in scoped user storage
-                const currentUserId = currentUser?._id || currentUser?.id || "";
-                const localKey = `bugbattle_timer_${currentUserId ? currentUserId + "_" : ""}${currentActiveEvent._id}_bug_snap`;
-                const savedLocal = sessionStorage.getItem(localKey) || localStorage.getItem(localKey);
-                if (savedLocal) {
+                // Check if final submission already completed (participants only; organizers can always test)
+                if (!isUserOrganizer) {
+                    const currentUserId = currentUser?._id || currentUser?.id || "";
+                    const localKey = `bugbattle_timer_${currentUserId ? currentUserId + "_" : ""}${currentActiveEvent._id}_bug_snap`;
+                    const savedLocal = sessionStorage.getItem(localKey) || localStorage.getItem(localKey);
+                    if (savedLocal) {
+                        try {
+                            const parsed = JSON.parse(savedLocal);
+                            if (parsed.isFinalSubmitted) {
+                                setIsFinalSubmitted(true);
+                            }
+                        } catch { }
+                    }
+
+                    // Check server team timer for finality
                     try {
-                        const parsed = JSON.parse(savedLocal);
-                        if (parsed.isFinalSubmitted) {
+                        const timerRes = await axios.get(`${API}/teams/timer/bug_snap`, {
+                            headers: { Authorization: `Bearer ${token}` }
+                        });
+                        if (timerRes.data?.timer?.isSubmitted) {
                             setIsFinalSubmitted(true);
                         }
                     } catch { }
                 }
-
-                // Check server team timer for finality
-                try {
-                    const timerRes = await axios.get(`${API}/teams/timer/bug_snap`, {
-                        headers: { Authorization: `Bearer ${token}` }
-                    });
-                    if (timerRes.data?.timer?.isSubmitted) {
-                        setIsFinalSubmitted(true);
-                    }
-                } catch { }
 
                 // 3. Fetch questions
                 const questionResponse = await axios.get(
@@ -550,10 +554,13 @@ function BugSnap() {
                     <RoundTimer
                         phase="bug_snap"
                         phaseName="BUG SNAP"
-                        durationMinutes={20}
+                        durationMinutes={activeEvent?.roundControl?.bug_snap?.durationMinutes || 20}
                         eventId={activeEvent?._id || "active"}
                         userId={user?._id || user?.id || ""}
                         userName={user?.name || user?.email || ""}
+                        isRoundStarted={isOrganizer ? true : Boolean(activeEvent?.roundControl?.bug_snap?.isStarted || activeEvent?.phase === "bug_snap")}
+                        serverStartedAt={activeEvent?.roundControl?.bug_snap?.startedAt}
+                        serverEndsAt={activeEvent?.roundControl?.bug_snap?.endsAt}
                         isQuestionsLoaded={questions.length > 0}
                         isFinalSubmitted={isFinalSubmitted}
                         onTimeUp={handleAutoSubmitAll}

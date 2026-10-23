@@ -379,7 +379,7 @@ export default function RoundTimer({
                 }
             }
 
-            if (serverSubmitted) {
+            if (serverSubmitted && !isOrganizer) {
                 setTimeLeft(0);
                 hasTriggeredTimeUp.current = true;
                 onTimeUp?.();
@@ -399,7 +399,7 @@ export default function RoundTimer({
                         sessionStorage.removeItem(storageKey);
                         localStorage.removeItem(storageKey);
                     } else {
-                        if (parsed.isFinalSubmitted) {
+                        if (parsed.isFinalSubmitted && !isOrganizer) {
                             setTimeLeft(0);
                             hasTriggeredTimeUp.current = true;
                             onTimeUp?.();
@@ -427,14 +427,30 @@ export default function RoundTimer({
             }
 
             // Calculate remaining seconds
-            const diffSeconds = Math.max(0, Math.floor((endsAtMs - now) / 1000));
+            let diffSeconds = Math.max(0, Math.floor((endsAtMs - now) / 1000));
+
+            // If time is up: organizers previewing/testing get an automatic fresh countdown so they are never locked out
+            if (diffSeconds <= 0) {
+                if (isOrganizer) {
+                    endsAtMs = now + totalSeconds * 1000;
+                    diffSeconds = totalSeconds;
+                    const organizerPayload = JSON.stringify({
+                        startedAt: now,
+                        endsAt: endsAtMs,
+                        durationMinutes,
+                        isFinalSubmitted: false
+                    });
+                    sessionStorage.setItem(storageKey, organizerPayload);
+                    localStorage.setItem(storageKey, organizerPayload);
+                } else {
+                    setTimeLeft(0);
+                    handleTimeExpired();
+                    return;
+                }
+            }
+
             setTimeLeft(diffSeconds);
             setTimerStarted(true);
-
-            if (diffSeconds <= 0) {
-                handleTimeExpired();
-                return;
-            }
 
             // Start countdown interval
             if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
